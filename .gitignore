@@ -1,0 +1,14 @@
+# Binary
+/api
+/worker
+/migrate
+
+# Local config override (contains real credentials)
+config.local.yaml
+
+# Env file with real secrets
+.env
+
+# IDE
+.idea/
+.vscode/

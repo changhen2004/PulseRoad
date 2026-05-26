@@ -1,0 +1,56 @@
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/gin-gonic/gin"
+
+	"pulseroad/internal/auth"
+	"pulseroad/internal/pkg/config"
+	"pulseroad/internal/pkg/database"
+	"pulseroad/internal/pkg/logger"
+	"pulseroad/internal/pkg/response"
+	"pulseroad/internal/product"
+	"pulseroad/internal/team"
+)
+
+// StartHttpServer 启动 HTTP 服务器。
+func StartHttpServer(cfg *config.Config) {
+	db, err := database.Init(&cfg.MySQL)
+	if err != nil {
+		log.Fatalf("failed to connect database: %v", err)
+	}
+	defer database.Close(db)
+
+	r := gin.New()  // 使用 Gin 的默认日志和恢复中间件
+	r.Use(gin.Recovery()) 
+	r.Use(logger.RequestLogger()) 
+
+	// 健康检查接口
+	r.GET("/health", func(c *gin.Context) {
+		response.Success(c, gin.H{"status": "ok"})
+	})
+
+	// 注册路由
+	authService := auth.NewService(auth.NewRepository(db), cfg.JWT.Secret)
+	auth.RegisterRoutes(r.Group("/api"), authService)
+	teamService := team.NewService(team.NewRepository(db))
+	team.RegisterRoutes(r.Group("/api"), authService, teamService)
+	productService := product.NewService(product.NewRepository(db), teamService)
+	product.RegisterRoutes(r.Group("/api"), authService, productService)
+
+	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	log.Printf("[%s] API server starting on %s (env=%s)", cfg.App.Name, addr, cfg.App.Env)
+	if err := r.Run(addr); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
+}
+
+func main() {
+	cfg, err := config.Load("internal/pkg/config/config.yaml")
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+	StartHttpServer(cfg)
+}
