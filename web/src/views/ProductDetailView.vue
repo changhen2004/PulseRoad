@@ -45,9 +45,12 @@ onMounted(loadProduct);
 watch(() => route.params.id, loadProduct);
 
 async function loadProduct() {
+  selectedFeedback.value = null;
+  product.value = null;
+  feedbackItems.value = [];
+
   if (!Number.isFinite(productID.value)) return;
   loading.value = true;
-  selectedFeedback.value = null;
   try {
     product.value = await productsApi.get(productID.value);
     await loadFeedback();
