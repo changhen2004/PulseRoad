@@ -1,0 +1,207 @@
+package feedback
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"pulseroad/internal/product"
+)
+
+type fakeFeedbackRepository struct {
+	nextID   uint
+	feedback map[uint]*Feedback
+}
+
+func newFakeFeedbackRepository() *fakeFeedbackRepository {
+	return &fakeFeedbackRepository{
+		nextID:   1,
+		feedback: make(map[uint]*Feedback),
+	}
+}
+
+func (r *fakeFeedbackRepository) Create(_ context.Context, feedback *Feedback) error {
+	feedback.ID = r.nextID
+	feedback.CreatedAt = time.Now()
+	feedback.UpdatedAt = feedback.CreatedAt
+	r.nextID++
+
+	copy := *feedback
+	r.feedback[feedback.ID] = &copy
+	return nil
+}
+
+func (r *fakeFeedbackRepository) ListByProduct(_ context.Context, productID uint) ([]Feedback, error) {
+	var items []Feedback
+	for _, feedback := range r.feedback {
+		if feedback.ProductID == productID {
+			items = append(items, *feedback)
+		}
+	}
+	return items, nil
+}
+
+func (r *fakeFeedbackRepository) FindByID(_ context.Context, id uint) (*Feedback, error) {
+	feedback, ok := r.feedback[id]
+	if !ok {
+		return nil, ErrFeedbackNotFound
+	}
+	copy := *feedback
+	return &copy, nil
+}
+
+func (r *fakeFeedbackRepository) Update(_ context.Context, feedback *Feedback) error {
+	feedback.UpdatedAt = time.Now()
+	copy := *feedback
+	r.feedback[feedback.ID] = &copy
+	return nil
+}
+
+type fakeProductAccess struct {
+	products map[uint]*product.ProductResponse
+	members  map[uint]map[uint]bool
+}
+
+func newFakeProductAccess() *fakeProductAccess {
+	return &fakeProductAccess{
+		products: make(map[uint]*product.ProductResponse),
+		members:  make(map[uint]map[uint]bool),
+	}
+}
+
+func (a *fakeProductAccess) addProduct(productID uint, teamID uint) {
+	a.products[productID] = &product.ProductResponse{ID: productID, TeamID: teamID}
+}
+
+func (a *fakeProductAccess) addMember(productID uint, userID uint) {
+	if a.members[productID] == nil {
+		a.members[productID] = make(map[uint]bool)
+	}
+	a.members[productID][userID] = true
+}
+
+func (a *fakeProductAccess) GetProduct(_ context.Context, userID uint, productID uint) (*product.ProductResponse, error) {
+	productResponse, ok := a.products[productID]
+	if !ok {
+		return nil, product.ErrProductNotFound
+	}
+	if !a.members[productID][userID] {
+		return nil, product.ErrForbidden
+	}
+
+	copy := *productResponse
+	return &copy, nil
+}
+
+func TestCreateFeedbackRequiresProductMember(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	svc := NewService(newFakeFeedbackRepository(), access)
+
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:       "Missing export",
+		Description: "CSV export would help.",
+	})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	if created.ID == 0 {
+		t.Fatal("expected feedback id")
+	}
+	if created.ProductID != 10 {
+		t.Fatalf("expected product id 10, got %d", created.ProductID)
+	}
+	if created.Status != StatusOpen || created.CreatedBy != 7 {
+		t.Fatalf("unexpected feedback: %#v", created)
+	}
+}
+
+func TestCreateFeedbackRejectsNonMember(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	svc := NewService(newFakeFeedbackRepository(), access)
+
+	_, err := svc.CreateFeedback(context.Background(), 8, 10, CreateFeedbackInput{Title: "Missing export"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestListAndGetFeedbackRequiresProductMember(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+	if _, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Dark mode"}); err != nil {
+		t.Fatalf("create second feedback: %v", err)
+	}
+
+	items, err := svc.ListFeedback(context.Background(), 7, 10)
+	if err != nil {
+		t.Fatalf("list feedback: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected two feedback items, got %#v", items)
+	}
+
+	got, err := svc.GetFeedback(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("get feedback: %v", err)
+	}
+	if got.ID != created.ID || got.ProductID != 10 {
+		t.Fatalf("unexpected feedback detail: %#v", got)
+	}
+}
+
+func TestGetFeedbackRejectsNonMember(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	_, err = svc.GetFeedback(context.Background(), 8, created.ID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestUpdateStatus(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	updated, err := svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: StatusResolved})
+	if err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	if updated.Status != StatusResolved {
+		t.Fatalf("expected status resolved, got %q", updated.Status)
+	}
+
+	_, err = svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: "closed"})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid, got %v", err)
+	}
+}
