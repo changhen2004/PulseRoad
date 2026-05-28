@@ -47,11 +47,13 @@ watch(() => route.params.id, loadProduct);
 async function loadProduct() {
   if (!Number.isFinite(productID.value)) return;
   loading.value = true;
+  selectedFeedback.value = null;
   try {
     product.value = await productsApi.get(productID.value);
-    selectedFeedback.value = null;
     await loadFeedback();
   } catch (error) {
+    product.value = null;
+    feedbackItems.value = [];
     message.error(error instanceof Error ? error.message : '加载产品详情失败');
   } finally {
     loading.value = false;
@@ -99,6 +101,7 @@ async function setFeedbackStatus(status: FeedbackStatus) {
   feedbackSaving.value = true;
   try {
     const updated = await feedbackApi.updateStatus(selectedFeedback.value.id, { status });
+    replaceFeedbackItem(updated);
     selectedFeedback.value = updated;
     await loadFeedback();
   } catch (error) {
@@ -110,6 +113,12 @@ async function setFeedbackStatus(status: FeedbackStatus) {
 
 function selectFeedback(feedback: Feedback) {
   selectedFeedback.value = feedback;
+}
+
+function replaceFeedbackItem(updated: Feedback) {
+  feedbackItems.value = feedbackItems.value.map((feedback) =>
+    feedback.id === updated.id ? updated : feedback
+  );
 }
 
 function closeFeedbackDetail(show: boolean) {
@@ -203,7 +212,7 @@ function formatDate(value?: string) {
         </div>
 
         <n-spin :show="feedbackLoading">
-          <n-list v-if="feedbackItems.length > 0" hoverable clickable>
+          <n-list v-if="feedbackItems.length > 0" hoverable clickable :bordered="false">
             <n-list-item
               v-for="feedback in feedbackItems"
               :key="feedback.id"

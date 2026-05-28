@@ -315,10 +315,14 @@ a {
 }
 
 .feedback-row-main p {
+  display: -webkit-box;
   margin: 6px 0 0;
   color: #687386;
   line-height: 1.55;
   overflow-wrap: anywhere;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .feedback-date {
