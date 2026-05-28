@@ -33,10 +33,16 @@ const selectedFeedback = ref<Feedback | null>(null);
 const product = ref<Product | null>(null);
 const feedbackItems = ref<Feedback[]>([]);
 const productID = computed(() => Number(route.params.id));
+let productLoadVersion = 0;
+let feedbackLoadVersion = 0;
 const feedbackForm = reactive({
   title: '',
   content: ''
 });
+type LoadFeedbackOptions = {
+  preserveFeedback?: Feedback;
+  clearOnError?: boolean;
+};
 const canCreateFeedback = computed(
   () => feedbackForm.title.trim().length > 0 && feedbackForm.content.trim().length > 0
 );
@@ -45,53 +51,75 @@ onMounted(loadProduct);
 watch(() => route.params.id, loadProduct);
 
 async function loadProduct() {
+  const requestedProductID = productID.value;
+  const requestVersion = ++productLoadVersion;
   selectedFeedback.value = null;
   product.value = null;
   feedbackItems.value = [];
 
-  if (!Number.isFinite(productID.value)) return;
+  if (!Number.isFinite(requestedProductID)) return;
   loading.value = true;
   try {
-    product.value = await productsApi.get(productID.value);
-    await loadFeedback();
+    const loadedProduct = await productsApi.get(requestedProductID);
+    if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
+    product.value = loadedProduct;
+    await loadFeedback(requestedProductID, { clearOnError: true });
   } catch (error) {
+    if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
     product.value = null;
     feedbackItems.value = [];
     message.error(error instanceof Error ? error.message : '加载产品详情失败');
   } finally {
-    loading.value = false;
+    if (isCurrentProductRequest(requestedProductID, requestVersion)) {
+      loading.value = false;
+    }
   }
 }
 
-async function loadFeedback() {
-  if (!Number.isFinite(productID.value)) return;
+async function loadFeedback(requestedProductID: number, options: LoadFeedbackOptions = {}) {
+  if (!Number.isFinite(requestedProductID)) return;
+  const requestVersion = ++feedbackLoadVersion;
   feedbackLoading.value = true;
   try {
-    feedbackItems.value = await feedbackApi.listByProduct(productID.value);
+    const items = await feedbackApi.listByProduct(requestedProductID);
+    if (!isCurrentFeedbackRequest(requestedProductID, requestVersion)) return;
+    feedbackItems.value = options.preserveFeedback
+      ? preserveFeedbackItem(items, options.preserveFeedback)
+      : items;
   } catch (error) {
+    if (!isCurrentFeedbackRequest(requestedProductID, requestVersion)) return;
+    if (options.preserveFeedback) {
+      feedbackItems.value = preserveFeedbackItem(feedbackItems.value, options.preserveFeedback);
+    } else if (options.clearOnError ?? true) {
+      feedbackItems.value = [];
+    }
     message.error(error instanceof Error ? error.message : '加载产品反馈失败');
   } finally {
-    feedbackLoading.value = false;
+    if (isCurrentFeedbackRequest(requestedProductID, requestVersion)) {
+      feedbackLoading.value = false;
+    }
   }
 }
 
 async function createFeedback() {
   if (feedbackSaving.value) return;
+  const requestedProductID = productID.value;
   const title = feedbackForm.title.trim();
   const content = feedbackForm.content.trim();
-  if (!title || !content) {
+  if (!Number.isFinite(requestedProductID) || !title || !content) {
     message.warning('请填写反馈标题和内容');
     return;
   }
 
   feedbackSaving.value = true;
   try {
-    const created = await feedbackApi.create(productID.value, { title, content });
+    const created = await feedbackApi.create(requestedProductID, { title, content });
+    if (requestedProductID !== productID.value) return;
     feedbackForm.title = '';
     feedbackForm.content = '';
     feedbackDrawerOpen.value = false;
     selectedFeedback.value = created;
-    await loadFeedback();
+    await loadFeedback(requestedProductID, { preserveFeedback: created, clearOnError: false });
   } catch (error) {
     message.error(error instanceof Error ? error.message : '创建反馈失败');
   } finally {
@@ -101,12 +129,14 @@ async function createFeedback() {
 
 async function setFeedbackStatus(status: FeedbackStatus) {
   if (!selectedFeedback.value || feedbackSaving.value) return;
+  const requestedProductID = productID.value;
   feedbackSaving.value = true;
   try {
     const updated = await feedbackApi.updateStatus(selectedFeedback.value.id, { status });
+    if (requestedProductID !== productID.value) return;
     replaceFeedbackItem(updated);
     selectedFeedback.value = updated;
-    await loadFeedback();
+    await loadFeedback(requestedProductID, { preserveFeedback: updated, clearOnError: false });
   } catch (error) {
     message.error(error instanceof Error ? error.message : '更新反馈状态失败');
   } finally {
@@ -122,6 +152,20 @@ function replaceFeedbackItem(updated: Feedback) {
   feedbackItems.value = feedbackItems.value.map((feedback) =>
     feedback.id === updated.id ? updated : feedback
   );
+}
+
+function preserveFeedbackItem(items: Feedback[], preserved: Feedback) {
+  const hasPreservedItem = items.some((feedback) => feedback.id === preserved.id);
+  if (!hasPreservedItem) return [preserved, ...items];
+  return items.map((feedback) => (feedback.id === preserved.id ? preserved : feedback));
+}
+
+function isCurrentProductRequest(requestedProductID: number, requestVersion: number) {
+  return requestedProductID === productID.value && requestVersion === productLoadVersion;
+}
+
+function isCurrentFeedbackRequest(requestedProductID: number, requestVersion: number) {
+  return requestedProductID === productID.value && requestVersion === feedbackLoadVersion;
 }
 
 function closeFeedbackDetail(show: boolean) {
@@ -241,7 +285,7 @@ function formatDate(value?: string) {
       </section>
     </n-spin>
 
-    <n-drawer v-model:show="feedbackDrawerOpen" :width="420" placement="right">
+    <n-drawer v-model:show="feedbackDrawerOpen" width="min(420px, 100vw)" placement="right">
       <n-drawer-content title="新建反馈" closable>
         <n-form label-placement="top" @submit.prevent="createFeedback">
           <n-form-item label="标题">
@@ -272,7 +316,7 @@ function formatDate(value?: string) {
 
     <n-drawer
       :show="Boolean(selectedFeedback)"
-      :width="460"
+      width="min(460px, 100vw)"
       placement="right"
       @update:show="closeFeedbackDetail"
     >
