@@ -1,0 +1,295 @@
+:root {
+  color: #172033;
+  background: #f5f7fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f7fb;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(245, 247, 251, 0.98)),
+    url('/src/assets/auth-pattern.svg');
+  background-size: cover;
+}
+
+.auth-panel {
+  width: min(420px, 100%);
+  padding: 32px;
+  background: #ffffff;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.brand-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.brand-subtitle {
+  margin: 4px 0 0;
+  color: #687386;
+  font-size: 14px;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.sidebar {
+  border-right: 1px solid #dfe5ef;
+  background: #ffffff;
+}
+
+.sidebar-header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.sidebar-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.topbar {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #dfe5ef;
+}
+
+.topbar-title {
+  min-width: 0;
+}
+
+.topbar-title h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.topbar-title p {
+  margin: 4px 0 0;
+  color: #687386;
+  font-size: 13px;
+}
+
+.page {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.page-description {
+  margin: 8px 0 0;
+  color: #687386;
+  line-height: 1.6;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.content-panel {
+  background: #ffffff;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.metric {
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+}
+
+.metric-label {
+  margin: 0 0 8px;
+  color: #687386;
+  font-size: 12px;
+}
+
+.metric-value {
+  margin: 0;
+  color: #172033;
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.empty-state {
+  padding: 40px 24px;
+  text-align: center;
+  color: #687386;
+}
+
+.table-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.table-title-cell strong {
+  color: #172033;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.table-title-cell span {
+  color: #687386;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.product-summary {
+  padding: 22px;
+}
+
+.product-summary h3 {
+  margin: 0 0 18px;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.product-summary dl {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.product-summary div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.product-summary dt {
+  color: #687386;
+}
+
+.product-summary dd {
+  margin: 0;
+  color: #172033;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .auth-panel {
+    padding: 24px;
+  }
+
+  .page {
+    padding: 18px 14px;
+  }
+
+  .page-header,
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .topbar {
+    height: auto;
+    padding: 16px;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-summary div {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

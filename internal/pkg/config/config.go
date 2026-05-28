@@ -10,12 +10,12 @@ import (
 )
 
 type Config struct {
-	App    AppConfig    `yaml:"app"`
-	Server ServerConfig `yaml:"server"`
-	MySQL  MySQLConfig  `yaml:"mysql"`
-	Redis  RedisConfig  `yaml:"redis"`
-	Kafka  KafkaConfig  `yaml:"kafka"`
-	JWT    JWTConfig    `yaml:"jwt"`
+	App      AppConfig      `yaml:"app"`
+	Server   ServerConfig   `yaml:"server"`
+	MySQL    MySQLConfig    `yaml:"mysql"`
+	Redis    RedisConfig    `yaml:"redis"`
+	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
+	JWT      JWTConfig      `yaml:"jwt"`
 }
 
 type AppConfig struct {
@@ -35,8 +35,8 @@ type RedisConfig struct {
 	Addr string `yaml:"addr"`
 }
 
-type KafkaConfig struct {
-	Brokers []string `yaml:"brokers"`
+type RabbitMQConfig struct {
+	URL string `yaml:"url"`
 }
 
 type JWTConfig struct {
@@ -113,8 +113,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("PULSEROAD_REDIS_ADDR"); v != "" {
 		cfg.Redis.Addr = v
 	}
-	if v := os.Getenv("PULSEROAD_KAFKA_BROKERS"); v != "" {
-		cfg.Kafka.Brokers = strings.Split(v, ",")
+	if v := os.Getenv("PULSEROAD_RABBITMQ_URL"); v != "" {
+		cfg.RabbitMQ.URL = v
 	}
 	if v := os.Getenv("PULSEROAD_JWT_SECRET"); v != "" {
 		cfg.JWT.Secret = v
@@ -139,10 +139,10 @@ func validate(cfg *Config) error {
 	if cfg.Redis.Addr == "" {
 		missing = append(missing, "redis.addr")
 	}
-	if len(cfg.Kafka.Brokers) == 0 {
-		missing = append(missing, "kafka.brokers")
+	if cfg.RabbitMQ.URL == "" {
+		missing = append(missing, "rabbitmq.url")
 	}
-	if cfg.JWT.Secret == ""  {
+	if cfg.JWT.Secret == "" {
 		missing = append(missing, "jwt.secret")
 	}
 

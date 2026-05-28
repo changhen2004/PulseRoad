@@ -11,5 +11,5 @@ func RegisterRoutes(r gin.IRouter, parser middleware.TokenParser, service *Servi
 	teams := r.Group("/teams", middleware.AuthRequired(parser))
 	teams.POST("", handler.Create)
 	teams.GET("", handler.List)
-	teams.GET("/:id", handler.Get)
+	teams.GET("/:team_id", handler.Get)
 }

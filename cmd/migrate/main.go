@@ -3,8 +3,11 @@ package main
 import (
 	"log"
 
+	_ "pulseroad/internal/auth"
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
+	_ "pulseroad/internal/product"
+	_ "pulseroad/internal/team"
 )
 
 func main() {

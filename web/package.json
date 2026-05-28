@@ -1,0 +1,30 @@
+{
+  "name": "pulseroad-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "@lucide/vue": "^1.16.0",
+    "naive-ui": "^2.41.0",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@tsconfig/node22": "^22.0.0",
+    "@vue/tsconfig": "^0.7.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.0"
+  }
+}

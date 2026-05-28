@@ -18,6 +18,10 @@ func RegisterModel(m ...any) {
 	models = append(models, m...)
 }
 
+func RegisteredModelCount() int {
+	return len(models)
+}
+
 func Init(cfg *config.MySQLConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),

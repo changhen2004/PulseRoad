@@ -63,7 +63,7 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 
-	teamID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil || teamID == 0 {
 		response.BadRequest(c, "invalid team id")
 		return
