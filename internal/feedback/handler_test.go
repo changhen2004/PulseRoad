@@ -139,6 +139,23 @@ func TestFeedbackHTTPRejectsNonMemberCreate(t *testing.T) {
 	}
 }
 
+func TestFeedbackHTTPRejectsMissingProductCreate(t *testing.T) {
+	r := newFeedbackTestRouter()
+
+	w := performFeedbackJSON(r, http.MethodPost, "/api/products/999/feedback", gin.H{
+		"title":   "Missing export",
+		"content": "CSV export would help.",
+	}, "user-7")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d with body %s", w.Code, w.Body.String())
+	}
+
+	payload := decodeFeedbackResponse(t, w)
+	if payload["code"] != float64(404) || payload["message"] != "product not found" {
+		t.Fatalf("unexpected error response: %#v", payload)
+	}
+}
+
 func TestFeedbackHTTPRejectsInvalidStatus(t *testing.T) {
 	r := newFeedbackTestRouter()
 
