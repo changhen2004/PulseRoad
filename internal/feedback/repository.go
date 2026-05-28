@@ -43,10 +43,6 @@ func (r *Repository) FindByID(ctx context.Context, id uint) (*Feedback, error) {
 	return &feedback, nil
 }
 
-func (r *Repository) Update(ctx context.Context, feedback *Feedback) error {
-	return r.db.WithContext(ctx).Save(feedback).Error
-}
-
 func (r *Repository) UpdateStatus(ctx context.Context, id uint, status string) error {
 	result := r.db.WithContext(ctx).
 		Model(&Feedback{}).

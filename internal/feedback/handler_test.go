@@ -72,15 +72,15 @@ func TestFeedbackHTTPCreateListGetAndUpdateStatus(t *testing.T) {
 	r := newFeedbackTestRouter()
 
 	createResp := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{
-		"title":       "Missing export",
-		"description": "CSV export would help.",
+		"title":   "Missing export",
+		"content": "CSV export would help.",
 	}, "user-7")
 	if createResp.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body = %s", createResp.Code, createResp.Body.String())
 	}
 	createPayload := decodeFeedbackResponse(t, createResp)
 	created := createPayload["data"].(map[string]any)
-	if created["status"] != StatusOpen || created["product_id"] != float64(10) {
+	if created["status"] != StatusOpen || created["product_id"] != float64(10) || created["content"] != "CSV export would help." {
 		t.Fatalf("unexpected create response: %#v", created)
 	}
 	feedbackID := uint(created["id"].(float64))
@@ -130,7 +130,10 @@ func TestFeedbackHTTPRequiresAuthentication(t *testing.T) {
 func TestFeedbackHTTPRejectsNonMemberCreate(t *testing.T) {
 	r := newFeedbackTestRouter()
 
-	w := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{"title": "Missing export"}, "user-8")
+	w := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{
+		"title":   "Missing export",
+		"content": "CSV export would help.",
+	}, "user-8")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d with body %s", w.Code, w.Body.String())
 	}
@@ -139,7 +142,10 @@ func TestFeedbackHTTPRejectsNonMemberCreate(t *testing.T) {
 func TestFeedbackHTTPRejectsInvalidStatus(t *testing.T) {
 	r := newFeedbackTestRouter()
 
-	createResp := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{"title": "Missing export"}, "user-7")
+	createResp := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{
+		"title":   "Missing export",
+		"content": "CSV export would help.",
+	}, "user-7")
 	if createResp.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body = %s", createResp.Code, createResp.Body.String())
 	}

@@ -51,10 +51,13 @@ func (r *fakeFeedbackRepository) FindByID(_ context.Context, id uint) (*Feedback
 	return &copy, nil
 }
 
-func (r *fakeFeedbackRepository) Update(_ context.Context, feedback *Feedback) error {
+func (r *fakeFeedbackRepository) UpdateStatus(_ context.Context, id uint, status string) error {
+	feedback, ok := r.feedback[id]
+	if !ok {
+		return ErrFeedbackNotFound
+	}
+	feedback.Status = status
 	feedback.UpdatedAt = time.Now()
-	copy := *feedback
-	r.feedback[feedback.ID] = &copy
 	return nil
 }
 
@@ -101,8 +104,8 @@ func TestCreateFeedbackRequiresProductMember(t *testing.T) {
 	svc := NewService(newFakeFeedbackRepository(), access)
 
 	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
-		Title:       "Missing export",
-		Description: "CSV export would help.",
+		Title:   "Missing export",
+		Content: "CSV export would help.",
 	})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
@@ -117,6 +120,9 @@ func TestCreateFeedbackRequiresProductMember(t *testing.T) {
 	if created.Status != StatusOpen || created.CreatedBy != 7 {
 		t.Fatalf("unexpected feedback: %#v", created)
 	}
+	if created.Content != "CSV export would help." {
+		t.Fatalf("expected content to be returned, got %q", created.Content)
+	}
 }
 
 func TestCreateFeedbackRejectsNonMember(t *testing.T) {
@@ -124,9 +130,24 @@ func TestCreateFeedbackRejectsNonMember(t *testing.T) {
 	access.addProduct(10, 20)
 	svc := NewService(newFakeFeedbackRepository(), access)
 
-	_, err := svc.CreateFeedback(context.Background(), 8, 10, CreateFeedbackInput{Title: "Missing export"})
+	_, err := svc.CreateFeedback(context.Background(), 8, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestCreateFeedbackRejectsMissingProduct(t *testing.T) {
+	svc := NewService(newFakeFeedbackRepository(), newFakeProductAccess())
+
+	_, err := svc.CreateFeedback(context.Background(), 7, 404, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
+	if !errors.Is(err, ErrProductNotFound) {
+		t.Fatalf("expected ErrProductNotFound, got %v", err)
 	}
 }
 
@@ -137,11 +158,17 @@ func TestListAndGetFeedbackRequiresProductMember(t *testing.T) {
 	repo := newFakeFeedbackRepository()
 	svc := NewService(repo, access)
 
-	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
 	}
-	if _, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Dark mode"}); err != nil {
+	if _, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:   "Dark mode",
+		Content: "Dark mode would reduce eye strain.",
+	}); err != nil {
 		t.Fatalf("create second feedback: %v", err)
 	}
 
@@ -160,6 +187,9 @@ func TestListAndGetFeedbackRequiresProductMember(t *testing.T) {
 	if got.ID != created.ID || got.ProductID != 10 {
 		t.Fatalf("unexpected feedback detail: %#v", got)
 	}
+	if got.Content != "CSV export would help." {
+		t.Fatalf("expected content to round-trip, got %q", got.Content)
+	}
 }
 
 func TestGetFeedbackRejectsNonMember(t *testing.T) {
@@ -169,7 +199,10 @@ func TestGetFeedbackRejectsNonMember(t *testing.T) {
 	repo := newFakeFeedbackRepository()
 	svc := NewService(repo, access)
 
-	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
 	}
@@ -187,7 +220,10 @@ func TestUpdateStatus(t *testing.T) {
 	repo := newFakeFeedbackRepository()
 	svc := NewService(repo, access)
 
-	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "Missing export"})
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
 	}
@@ -198,6 +234,14 @@ func TestUpdateStatus(t *testing.T) {
 	}
 	if updated.Status != StatusResolved {
 		t.Fatalf("expected status resolved, got %q", updated.Status)
+	}
+
+	got, err := svc.GetFeedback(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("get feedback after update: %v", err)
+	}
+	if got.Status != StatusResolved {
+		t.Fatalf("expected persisted status resolved, got %q", got.Status)
 	}
 
 	_, err = svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: "closed"})

@@ -16,8 +16,8 @@ var (
 )
 
 type CreateFeedbackInput struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 type UpdateFeedbackStatusInput struct {
@@ -28,7 +28,7 @@ type RepositoryPort interface {
 	Create(ctx context.Context, feedback *Feedback) error
 	ListByProduct(ctx context.Context, productID uint) ([]Feedback, error)
 	FindByID(ctx context.Context, id uint) (*Feedback, error)
-	Update(ctx context.Context, feedback *Feedback) error
+	UpdateStatus(ctx context.Context, id uint, status string) error
 }
 
 type ProductAccess interface {
@@ -46,8 +46,8 @@ func NewService(repo RepositoryPort, productAccess ProductAccess) *Service {
 
 func (s *Service) CreateFeedback(ctx context.Context, userID uint, productID uint, input CreateFeedbackInput) (*FeedbackResponse, error) {
 	title := strings.TrimSpace(input.Title)
-	description := strings.TrimSpace(input.Description)
-	if userID == 0 || productID == 0 || title == "" {
+	content := strings.TrimSpace(input.Content)
+	if userID == 0 || productID == 0 || title == "" || content == "" {
 		return nil, ErrInvalid
 	}
 
@@ -56,11 +56,11 @@ func (s *Service) CreateFeedback(ctx context.Context, userID uint, productID uin
 	}
 
 	feedback := &Feedback{
-		ProductID:   productID,
-		Title:       title,
-		Description: description,
-		Status:      StatusOpen,
-		CreatedBy:   userID,
+		ProductID: productID,
+		Title:     title,
+		Content:   content,
+		Status:    StatusOpen,
+		CreatedBy: userID,
 	}
 	if err := s.repo.Create(ctx, feedback); err != nil {
 		return nil, err
@@ -128,11 +128,11 @@ func (s *Service) UpdateStatus(ctx context.Context, userID uint, feedbackID uint
 		return nil, err
 	}
 
-	feedback.Status = status
-	if err := s.repo.Update(ctx, feedback); err != nil {
+	if err := s.repo.UpdateStatus(ctx, feedbackID, status); err != nil {
 		return nil, err
 	}
 
+	feedback.Status = status
 	response := feedback.ToResponse()
 	return &response, nil
 }
