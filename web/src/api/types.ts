@@ -48,3 +48,25 @@ export interface CreateProductPayload {
   name: string;
   description: string;
 }
+
+export type FeedbackStatus = 'open' | 'resolved';
+
+export interface Feedback {
+  id: number;
+  product_id: number;
+  title: string;
+  content: string;
+  status: FeedbackStatus;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateFeedbackPayload {
+  title: string;
+  content: string;
+}
+
+export interface UpdateFeedbackStatusPayload {
+  status: FeedbackStatus;
+}

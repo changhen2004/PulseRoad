@@ -38,6 +38,18 @@ describe('api client', () => {
     await expect(api.get('/teams/1')).resolves.toEqual({ name: 'Core' });
   });
 
+  it('supports patch requests', async () => {
+    const adapter = responseAdapter(200, { code: 0, message: 'ok', data: { id: 1 } });
+    const api = createApiClient({ adapter });
+
+    await api.patch('/feedback/1/status', { status: 'resolved' });
+
+    const config = vi.mocked(adapter).mock.calls[0][0] as InternalAxiosRequestConfig;
+    expect(config.method).toBe('patch');
+    expect(config.url).toBe('/feedback/1/status');
+    expect(config.data).toBe(JSON.stringify({ status: 'resolved' }));
+  });
+
   it('clears token and notifies callers when backend returns unauthorized', async () => {
     setStoredToken('token-123');
     const onUnauthorized = vi.fn();
