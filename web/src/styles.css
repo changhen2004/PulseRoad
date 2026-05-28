@@ -264,6 +264,97 @@ a {
   overflow-wrap: anywhere;
 }
 
+.feedback-panel {
+  margin-top: 18px;
+}
+
+.feedback-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.feedback-panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.feedback-panel-header p {
+  margin: 6px 0 0;
+  color: #687386;
+  line-height: 1.5;
+}
+
+.feedback-row {
+  cursor: pointer;
+}
+
+.feedback-row .n-list-item__main {
+  min-width: 0;
+}
+
+.feedback-row-main {
+  min-width: 0;
+}
+
+.feedback-row-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.feedback-row-title strong {
+  color: #172033;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.feedback-row-main p {
+  margin: 6px 0 0;
+  color: #687386;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.feedback-date {
+  display: block;
+  margin-top: 10px;
+  color: #8a94a6;
+  font-size: 12px;
+}
+
+.feedback-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.feedback-detail h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.35;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.feedback-detail p {
+  margin: 0;
+  color: #3c4658;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.feedback-detail time {
+  color: #8a94a6;
+  font-size: 13px;
+}
+
 @media (max-width: 760px) {
   .auth-panel {
     padding: 24px;
@@ -291,5 +382,19 @@ a {
   .product-summary div {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .feedback-panel-header,
+  .feedback-row-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .feedback-panel-header {
+    padding: 18px;
+  }
+
+  .feedback-panel-header .n-button {
+    width: 100%;
   }
 }
