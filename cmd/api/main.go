@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"pulseroad/internal/auth"
+	"pulseroad/internal/feedback"
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
 	"pulseroad/internal/pkg/logger"
@@ -23,9 +24,9 @@ func StartHttpServer(cfg *config.Config) {
 	}
 	defer database.Close(db)
 
-	r := gin.New()  // 使用 Gin 的默认日志和恢复中间件
-	r.Use(gin.Recovery()) 
-	r.Use(logger.RequestLogger()) 
+	r := gin.New() // 使用 Gin 的默认日志和恢复中间件
+	r.Use(gin.Recovery())
+	r.Use(logger.RequestLogger())
 
 	// 健康检查接口
 	r.GET("/health", func(c *gin.Context) {
@@ -39,6 +40,8 @@ func StartHttpServer(cfg *config.Config) {
 	team.RegisterRoutes(r.Group("/api"), authService, teamService)
 	productService := product.NewService(product.NewRepository(db), teamService)
 	product.RegisterRoutes(r.Group("/api"), authService, productService)
+	feedbackService := feedback.NewService(feedback.NewRepository(db), productService)
+	feedback.RegisterRoutes(r.Group("/api"), authService, feedbackService)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("[%s] API server starting on %s (env=%s)", cfg.App.Name, addr, cfg.App.Env)

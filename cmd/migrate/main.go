@@ -4,6 +4,7 @@ import (
 	"log"
 
 	_ "pulseroad/internal/auth"
+	_ "pulseroad/internal/feedback"
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
 	_ "pulseroad/internal/product"

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"pulseroad/internal/feedback"
 	"pulseroad/internal/product"
 	"pulseroad/internal/team"
 )
@@ -28,4 +29,5 @@ func TestProtectedRoutesRegisterWithoutPanic(t *testing.T) {
 
 	team.RegisterRoutes(r.Group("/api"), parser, nil)
 	product.RegisterRoutes(r.Group("/api"), parser, nil)
+	feedback.RegisterRoutes(r.Group("/api"), parser, nil)
 }
