@@ -51,14 +51,15 @@ func (r *fakeFeedbackRepository) FindByID(_ context.Context, id uint) (*Feedback
 	return &copy, nil
 }
 
-func (r *fakeFeedbackRepository) UpdateStatus(_ context.Context, id uint, status string) error {
+func (r *fakeFeedbackRepository) UpdateStatus(_ context.Context, id uint, status string) (*Feedback, error) {
 	feedback, ok := r.feedback[id]
 	if !ok {
-		return ErrFeedbackNotFound
+		return nil, ErrFeedbackNotFound
 	}
 	feedback.Status = status
 	feedback.UpdatedAt = time.Now()
-	return nil
+	copy := *feedback
+	return &copy, nil
 }
 
 type fakeProductAccess struct {
@@ -235,6 +236,9 @@ func TestUpdateStatus(t *testing.T) {
 	if updated.Status != StatusResolved {
 		t.Fatalf("expected status resolved, got %q", updated.Status)
 	}
+	if !updated.UpdatedAt.After(created.UpdatedAt) {
+		t.Fatalf("expected updated_at after original timestamp, got original=%s updated=%s", created.UpdatedAt, updated.UpdatedAt)
+	}
 
 	got, err := svc.GetFeedback(context.Background(), 7, created.ID)
 	if err != nil {
@@ -242,6 +246,14 @@ func TestUpdateStatus(t *testing.T) {
 	}
 	if got.Status != StatusResolved {
 		t.Fatalf("expected persisted status resolved, got %q", got.Status)
+	}
+
+	updatedAgain, err := svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: StatusResolved})
+	if err != nil {
+		t.Fatalf("repeat update status: %v", err)
+	}
+	if updatedAgain.Status != StatusResolved {
+		t.Fatalf("expected repeated status resolved, got %q", updatedAgain.Status)
 	}
 
 	_, err = svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: "closed"})

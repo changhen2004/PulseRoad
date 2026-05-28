@@ -28,7 +28,7 @@ type RepositoryPort interface {
 	Create(ctx context.Context, feedback *Feedback) error
 	ListByProduct(ctx context.Context, productID uint) ([]Feedback, error)
 	FindByID(ctx context.Context, id uint) (*Feedback, error)
-	UpdateStatus(ctx context.Context, id uint, status string) error
+	UpdateStatus(ctx context.Context, id uint, status string) (*Feedback, error)
 }
 
 type ProductAccess interface {
@@ -128,12 +128,12 @@ func (s *Service) UpdateStatus(ctx context.Context, userID uint, feedbackID uint
 		return nil, err
 	}
 
-	if err := s.repo.UpdateStatus(ctx, feedbackID, status); err != nil {
+	updated, err := s.repo.UpdateStatus(ctx, feedbackID, status)
+	if err != nil {
 		return nil, err
 	}
 
-	feedback.Status = status
-	response := feedback.ToResponse()
+	response := updated.ToResponse()
 	return &response, nil
 }
 
