@@ -17,6 +17,51 @@ type fakeUserRepository struct {
 	emails map[string]uint
 }
 
+type fakeLoginLimiter struct {
+	blocked        map[string]bool
+	failures       map[string]int
+	resetEmails    []string
+	checkEmails    []string
+	failWith       error
+	resetFailWith  error
+	recordFailWith error
+}
+
+func newFakeLoginLimiter() *fakeLoginLimiter {
+	return &fakeLoginLimiter{
+		blocked:  make(map[string]bool),
+		failures: make(map[string]int),
+	}
+}
+
+func (l *fakeLoginLimiter) Check(ctx context.Context, email string) error {
+	l.checkEmails = append(l.checkEmails, email)
+	if l.failWith != nil {
+		return l.failWith
+	}
+	if l.blocked[email] {
+		return ErrTooManyLoginAttempts
+	}
+	return nil
+}
+
+func (l *fakeLoginLimiter) RecordFailure(ctx context.Context, email string) error {
+	if l.recordFailWith != nil {
+		return l.recordFailWith
+	}
+	l.failures[email]++
+	return nil
+}
+
+func (l *fakeLoginLimiter) Reset(ctx context.Context, email string) error {
+	if l.resetFailWith != nil {
+		return l.resetFailWith
+	}
+	l.resetEmails = append(l.resetEmails, email)
+	delete(l.failures, email)
+	return nil
+}
+
 func newFakeUserRepository() *fakeUserRepository {
 	return &fakeUserRepository{
 		nextID: 1,
@@ -165,6 +210,76 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestLoginRecordsFailureForWrongPassword(t *testing.T) {
+	repo := newFakeUserRepository()
+	limiter := newFakeLoginLimiter()
+	svc := NewServiceWithLoginLimiter(repo, testJWTSecret, limiter)
+	if _, err := svc.Register(context.Background(), RegisterInput{
+		Email:    "ada@example.com",
+		Password: "password123",
+		Name:     "Ada",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		Email:    " Ada@Example.COM ",
+		Password: "wrong-password",
+	})
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+	if limiter.failures["ada@example.com"] != 1 {
+		t.Fatalf("expected one failed login for normalized email, got %#v", limiter.failures)
+	}
+}
+
+func TestLoginRejectsWhenFailureLimitReached(t *testing.T) {
+	repo := newFakeUserRepository()
+	limiter := newFakeLoginLimiter()
+	limiter.blocked["ada@example.com"] = true
+	svc := NewServiceWithLoginLimiter(repo, testJWTSecret, limiter)
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		Email:    "ada@example.com",
+		Password: "password123",
+	})
+	if !errors.Is(err, ErrTooManyLoginAttempts) {
+		t.Fatalf("expected ErrTooManyLoginAttempts, got %v", err)
+	}
+	if len(limiter.checkEmails) != 1 || limiter.checkEmails[0] != "ada@example.com" {
+		t.Fatalf("expected limiter check for normalized email, got %#v", limiter.checkEmails)
+	}
+}
+
+func TestLoginResetsFailuresAfterSuccessfulLogin(t *testing.T) {
+	repo := newFakeUserRepository()
+	limiter := newFakeLoginLimiter()
+	svc := NewServiceWithLoginLimiter(repo, testJWTSecret, limiter)
+	if _, err := svc.Register(context.Background(), RegisterInput{
+		Email:    "ada@example.com",
+		Password: "password123",
+		Name:     "Ada",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	limiter.failures["ada@example.com"] = 3
+
+	if _, err := svc.Login(context.Background(), LoginInput{
+		Email:    "ada@example.com",
+		Password: "password123",
+	}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	if len(limiter.resetEmails) != 1 || limiter.resetEmails[0] != "ada@example.com" {
+		t.Fatalf("expected reset for successful login, got %#v", limiter.resetEmails)
+	}
+	if limiter.failures["ada@example.com"] != 0 {
+		t.Fatalf("expected failures cleared, got %#v", limiter.failures)
 	}
 }
 

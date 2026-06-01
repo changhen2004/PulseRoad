@@ -1,7 +1,7 @@
 import { createApp, defineComponent, h, nextTick, reactive, type App } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Feedback, Product, UpdateFeedbackStatusPayload } from '../api/types';
+import type { FeatureFlag, Feedback, Product, UpdateFeedbackStatusPayload } from '../api/types';
 
 function product(id: number): Product {
   return {
@@ -28,12 +28,44 @@ function feedback(id: number, overrides: Partial<Feedback> = {}): Feedback {
   };
 }
 
+function featureFlag(id: number, overrides: Partial<FeatureFlag> = {}): FeatureFlag {
+  return {
+    id,
+    product_id: 1,
+    key: 'new_dashboard',
+    name: 'New Dashboard',
+    description: 'Roll out dashboard',
+    environment: 'production',
+    enabled: false,
+    rollout_percentage: 25,
+    created_by: 1,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function asyncStubComponent(tag = 'div') {
+  return defineComponent({
+    inheritAttrs: false,
+    props: {
+      show: {
+        type: Boolean,
+        default: false
+      }
+    },
+    setup(props, { attrs, slots }) {
+      return () => h(tag, attrs, [props.show ? h('span', 'loading') : null, slots.default?.()]);
+    }
+  });
 }
 
 function stubComponent(tag = 'div') {
@@ -55,6 +87,8 @@ async function flushView() {
 interface ViewMocks {
   productGet: ReturnType<typeof vi.fn<(id: number) => Promise<Product>>>;
   listByProduct: ReturnType<typeof vi.fn<(productID: number) => Promise<Feedback[]>>>;
+  listFlagsByProduct: ReturnType<typeof vi.fn<(productID: number) => Promise<FeatureFlag[]>>>;
+  toggleFlag: ReturnType<typeof vi.fn<(id: number, payload: { enabled: boolean }) => Promise<FeatureFlag>>>;
   updateStatus: ReturnType<
     typeof vi.fn<(id: number, payload: UpdateFeedbackStatusPayload) => Promise<Feedback>>
   >;
@@ -68,9 +102,12 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
   const message = { error: vi.fn(), warning: vi.fn() };
   const productGet = vi.fn<(id: number) => Promise<Product>>();
   const listByProduct = vi.fn<(productID: number) => Promise<Feedback[]>>();
+  const listFlagsByProduct = vi.fn<(productID: number) => Promise<FeatureFlag[]>>();
+  const toggleFlag = vi.fn<(id: number, payload: { enabled: boolean }) => Promise<FeatureFlag>>();
   const updateStatus =
     vi.fn<(id: number, payload: UpdateFeedbackStatusPayload) => Promise<Feedback>>();
-  configure({ productGet, listByProduct, updateStatus });
+  listFlagsByProduct.mockResolvedValue([]);
+  configure({ productGet, listByProduct, listFlagsByProduct, toggleFlag, updateStatus });
 
   vi.doMock('vue-router', () => ({
     useRoute: () => route,
@@ -87,6 +124,16 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
       updateStatus
     }
   }));
+  vi.doMock('../api/flagflow', () => ({
+    flagflowApi: {
+      create: vi.fn(),
+      evaluate: vi.fn(),
+      get: vi.fn(),
+      listByProduct: listFlagsByProduct,
+      toggle: toggleFlag,
+      update: vi.fn()
+    }
+  }));
   vi.doMock('naive-ui', () => ({
     NButton: stubComponent('button'),
     NDrawer: stubComponent(),
@@ -95,10 +142,11 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
     NFormItem: stubComponent(),
     NIcon: stubComponent('span'),
     NInput: stubComponent('input'),
+    NInputNumber: stubComponent('input'),
     NList: stubComponent(),
     NListItem: stubComponent(),
     NSpace: stubComponent(),
-    NSpin: stubComponent(),
+    NSpin: asyncStubComponent(),
     NTag: stubComponent('span'),
     useMessage: () => message
   }));
@@ -111,7 +159,7 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
   app.mount(root);
   await flushView();
 
-  return { app, root, route, productGet, listByProduct, updateStatus };
+  return { app, root, route, productGet, listByProduct, listFlagsByProduct, toggleFlag, updateStatus };
 }
 
 afterEach(() => {
@@ -119,6 +167,7 @@ afterEach(() => {
   vi.doUnmock('vue-router');
   vi.doUnmock('../api/products');
   vi.doUnmock('../api/feedback');
+  vi.doUnmock('../api/flagflow');
   vi.doUnmock('naive-ui');
   document.body.innerHTML = '';
 });
@@ -241,6 +290,61 @@ describe('ProductDetailView feedback state', () => {
     } finally {
       app?.unmount();
       app = undefined;
+    }
+  });
+
+  it('keeps the updated flag status when the follow-up refresh fails', async () => {
+    const disabledFlag = featureFlag(11);
+    const enabledFlag = featureFlag(11, { enabled: true });
+    const mounted = await mountView(({ productGet, listByProduct, listFlagsByProduct, toggleFlag }) => {
+      productGet.mockImplementation(async (id) => product(id));
+      listByProduct.mockResolvedValue([]);
+      listFlagsByProduct.mockResolvedValueOnce([disabledFlag]).mockRejectedValueOnce(new Error('offline'));
+      toggleFlag.mockResolvedValue(enabledFlag);
+    });
+    let app: App<Element> | undefined = mounted.app;
+
+    try {
+      const enableButton = Array.from(mounted.root.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('开启')
+      );
+      enableButton?.click();
+      await flushView();
+
+      expect(mounted.toggleFlag).toHaveBeenCalledWith(11, { enabled: true });
+      expect(mounted.root.textContent).toContain('已开启');
+      expect(mounted.root.textContent).not.toContain('已关闭');
+    } finally {
+      app?.unmount();
+      app = undefined;
+    }
+  });
+
+  it('stops stale feedback loading when switched product fails to load', async () => {
+    const firstFeedback = deferred<Feedback[]>();
+    const mounted = await mountView(({ productGet, listByProduct }) => {
+      productGet.mockImplementation((id) => {
+        if (id === 2) return Promise.reject(new Error('product unavailable'));
+        return Promise.resolve(product(id));
+      });
+      listByProduct.mockImplementation((productID) => {
+        if (productID === 1) return firstFeedback.promise;
+        return Promise.resolve([]);
+      });
+    });
+    let app: App<Element> | undefined = mounted.app;
+
+    try {
+      expect(mounted.root.textContent).toContain('loading');
+
+      mounted.route.params.id = '2';
+      await flushView();
+
+      expect(mounted.root.textContent).not.toContain('loading');
+    } finally {
+      app?.unmount();
+      app = undefined;
+      firstFeedback.resolve([]);
     }
   });
 });

@@ -67,6 +67,19 @@ type fakeProductAccess struct {
 	members  map[uint]map[uint]bool
 }
 
+type fakeFeedbackEventPublisher struct {
+	events []FeedbackCreatedEvent
+	err    error
+}
+
+func (p *fakeFeedbackEventPublisher) PublishFeedbackCreated(_ context.Context, event FeedbackCreatedEvent) error {
+	if p.err != nil {
+		return p.err
+	}
+	p.events = append(p.events, event)
+	return nil
+}
+
 func newFakeProductAccess() *fakeProductAccess {
 	return &fakeProductAccess{
 		products: make(map[uint]*product.ProductResponse),
@@ -123,6 +136,54 @@ func TestCreateFeedbackRequiresProductMember(t *testing.T) {
 	}
 	if created.Content != "CSV export would help." {
 		t.Fatalf("expected content to be returned, got %q", created.Content)
+	}
+}
+
+func TestCreateFeedbackPublishesCreatedEvent(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	publisher := &fakeFeedbackEventPublisher{}
+	svc := NewServiceWithPublisher(newFakeFeedbackRepository(), access, publisher)
+
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	if len(publisher.events) != 1 {
+		t.Fatalf("expected one event, got %#v", publisher.events)
+	}
+	event := publisher.events[0]
+	if event.FeedbackID != created.ID || event.ProductID != 10 || event.TeamID != 20 || event.CreatedBy != 7 {
+		t.Fatalf("unexpected event: %#v", event)
+	}
+	if event.Title != "Missing export" || event.Status != StatusOpen {
+		t.Fatalf("unexpected event payload: %#v", event)
+	}
+	if event.OccurredAt.IsZero() {
+		t.Fatal("expected occurred_at to be set")
+	}
+}
+
+func TestCreateFeedbackDoesNotPublishWhenCreateFails(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	publisher := &fakeFeedbackEventPublisher{}
+	svc := NewServiceWithPublisher(newFakeFeedbackRepository(), access, publisher)
+
+	_, err := svc.CreateFeedback(context.Background(), 8, 10, CreateFeedbackInput{
+		Title:   "Missing export",
+		Content: "CSV export would help.",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+	if len(publisher.events) != 0 {
+		t.Fatalf("expected no events, got %#v", publisher.events)
 	}
 }
 

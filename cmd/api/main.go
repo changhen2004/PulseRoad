@@ -3,14 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"pulseroad/internal/auth"
 	"pulseroad/internal/feedback"
+	"pulseroad/internal/flagflow"
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
 	"pulseroad/internal/pkg/logger"
+	"pulseroad/internal/pkg/rabbitmq"
+	"pulseroad/internal/pkg/redis"
 	"pulseroad/internal/pkg/response"
 	"pulseroad/internal/product"
 	"pulseroad/internal/team"
@@ -24,6 +28,26 @@ func StartHttpServer(cfg *config.Config) {
 	}
 	defer database.Close(db)
 
+	redisClient, err := redis.Init(&cfg.Redis)
+	if err != nil {
+		log.Fatalf("failed to connect redis: %v", err)
+	}
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Printf("failed to close redis connection: %v", err)
+		}
+	}()
+
+	rabbitClient, err := rabbitmq.Dial(cfg.RabbitMQ.URL)
+	if err != nil {
+		log.Fatalf("failed to connect rabbitmq: %v", err)
+	}
+	defer func() {
+		if err := rabbitClient.Close(); err != nil {
+			log.Printf("failed to close rabbitmq connection: %v", err)
+		}
+	}()
+
 	r := gin.New() // 使用 Gin 的默认日志和恢复中间件
 	r.Use(gin.Recovery())
 	r.Use(logger.RequestLogger())
@@ -34,14 +58,20 @@ func StartHttpServer(cfg *config.Config) {
 	})
 
 	// 注册路由
-	authService := auth.NewService(auth.NewRepository(db), cfg.JWT.Secret)
+	loginLimiter := auth.NewRedisLoginLimiter(redisClient, 5, 15*time.Minute)
+	authService := auth.NewServiceWithLoginLimiter(auth.NewRepository(db), cfg.JWT.Secret, loginLimiter)
 	auth.RegisterRoutes(r.Group("/api"), authService)
 	teamService := team.NewService(team.NewRepository(db))
 	team.RegisterRoutes(r.Group("/api"), authService, teamService)
 	productService := product.NewService(product.NewRepository(db), teamService)
 	product.RegisterRoutes(r.Group("/api"), authService, productService)
-	feedbackService := feedback.NewService(feedback.NewRepository(db), productService)
+	feedbackPublisher := feedback.NewRabbitMQPublisher(rabbitClient)
+	feedbackService := feedback.NewServiceWithPublisher(feedback.NewRepository(db), productService, feedbackPublisher)
 	feedback.RegisterRoutes(r.Group("/api"), authService, feedbackService)
+	flagflowCache := flagflow.NewRedisCache(redisClient, 5*time.Minute)
+	flagflowPublisher := flagflow.NewRabbitMQPublisher(rabbitClient)
+	flagflowService := flagflow.NewService(flagflow.NewRepository(db), productService, flagflowCache, flagflowPublisher)
+	flagflow.RegisterRoutes(r.Group("/api"), authService, flagflowService)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("[%s] API server starting on %s (env=%s)", cfg.App.Name, addr, cfg.App.Env)

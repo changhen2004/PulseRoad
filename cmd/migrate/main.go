@@ -5,6 +5,7 @@ import (
 
 	_ "pulseroad/internal/auth"
 	_ "pulseroad/internal/feedback"
+	_ "pulseroad/internal/flagflow"
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
 	_ "pulseroad/internal/product"

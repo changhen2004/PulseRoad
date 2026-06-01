@@ -7,10 +7,11 @@ import (
 )
 
 const (
-	CodeSuccess       = 0
-	CodeBadRequest    = 400
-	CodeUnauthorized  = 401
-	CodeInternalError = 500
+	CodeSuccess         = 0
+	CodeBadRequest      = 400
+	CodeUnauthorized    = 401
+	CodeTooManyRequests = 429
+	CodeInternalError   = 500
 )
 
 type Response struct {
@@ -33,6 +34,10 @@ func BadRequest(c *gin.Context, msg string) {
 
 func Unauthorized(c *gin.Context, msg string) {
 	Fail(c, http.StatusUnauthorized, CodeUnauthorized, msg)
+}
+
+func TooManyRequests(c *gin.Context, msg string) {
+	Fail(c, http.StatusTooManyRequests, CodeTooManyRequests, msg)
 }
 
 func InternalError(c *gin.Context, msg string) {

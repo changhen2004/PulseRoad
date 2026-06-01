@@ -3,7 +3,9 @@ package feedback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"pulseroad/internal/product"
 )
@@ -35,13 +37,41 @@ type ProductAccess interface {
 	GetProduct(ctx context.Context, userID uint, productID uint) (*product.ProductResponse, error)
 }
 
+type FeedbackCreatedEvent struct {
+	FeedbackID uint      `json:"feedback_id"`
+	ProductID  uint      `json:"product_id"`
+	TeamID     uint      `json:"team_id"`
+	Title      string    `json:"title"`
+	Status     string    `json:"status"`
+	CreatedBy  uint      `json:"created_by"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+type EventPublisher interface {
+	PublishFeedbackCreated(ctx context.Context, event FeedbackCreatedEvent) error
+}
+
+type noopEventPublisher struct{}
+
+func (noopEventPublisher) PublishFeedbackCreated(context.Context, FeedbackCreatedEvent) error {
+	return nil
+}
+
 type Service struct {
 	repo          RepositoryPort
 	productAccess ProductAccess
+	publisher     EventPublisher
 }
 
 func NewService(repo RepositoryPort, productAccess ProductAccess) *Service {
-	return &Service{repo: repo, productAccess: productAccess}
+	return NewServiceWithPublisher(repo, productAccess, noopEventPublisher{})
+}
+
+func NewServiceWithPublisher(repo RepositoryPort, productAccess ProductAccess, publisher EventPublisher) *Service {
+	if publisher == nil {
+		publisher = noopEventPublisher{}
+	}
+	return &Service{repo: repo, productAccess: productAccess, publisher: publisher}
 }
 
 func (s *Service) CreateFeedback(ctx context.Context, userID uint, productID uint, input CreateFeedbackInput) (*FeedbackResponse, error) {
@@ -51,7 +81,8 @@ func (s *Service) CreateFeedback(ctx context.Context, userID uint, productID uin
 		return nil, ErrInvalid
 	}
 
-	if err := s.requireProductAccess(ctx, userID, productID); err != nil {
+	productResponse, err := s.productForUser(ctx, userID, productID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -64,6 +95,18 @@ func (s *Service) CreateFeedback(ctx context.Context, userID uint, productID uin
 	}
 	if err := s.repo.Create(ctx, feedback); err != nil {
 		return nil, err
+	}
+
+	if err := s.publisher.PublishFeedbackCreated(ctx, FeedbackCreatedEvent{
+		FeedbackID: feedback.ID,
+		ProductID:  feedback.ProductID,
+		TeamID:     productResponse.TeamID,
+		Title:      feedback.Title,
+		Status:     feedback.Status,
+		CreatedBy:  feedback.CreatedBy,
+		OccurredAt: time.Now(),
+	}); err != nil {
+		return nil, fmt.Errorf("publish feedback created event: %w", err)
 	}
 
 	response := feedback.ToResponse()
@@ -138,14 +181,19 @@ func (s *Service) UpdateStatus(ctx context.Context, userID uint, feedbackID uint
 }
 
 func (s *Service) requireProductAccess(ctx context.Context, userID uint, productID uint) error {
-	_, err := s.productAccess.GetProduct(ctx, userID, productID)
+	_, err := s.productForUser(ctx, userID, productID)
+	return err
+}
+
+func (s *Service) productForUser(ctx context.Context, userID uint, productID uint) (*product.ProductResponse, error) {
+	productResponse, err := s.productAccess.GetProduct(ctx, userID, productID)
 	if errors.Is(err, product.ErrForbidden) {
-		return ErrForbidden
+		return nil, ErrForbidden
 	}
 	if errors.Is(err, product.ErrProductNotFound) {
-		return ErrProductNotFound
+		return nil, ErrProductNotFound
 	}
-	return err
+	return productResponse, err
 }
 
 func validStatus(status string) bool {

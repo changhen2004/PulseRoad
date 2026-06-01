@@ -71,6 +71,8 @@ func (h *Handler) writeError(c *gin.Context, err error) {
 		response.BadRequest(c, err.Error())
 	case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrUnauthorized):
 		response.Unauthorized(c, "unauthorized")
+	case errors.Is(err, ErrTooManyLoginAttempts):
+		response.TooManyRequests(c, "too many login attempts")
 	default:
 		response.InternalError(c, "internal server error")
 	}

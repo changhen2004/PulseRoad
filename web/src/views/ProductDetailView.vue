@@ -8,6 +8,7 @@ import {
   NFormItem,
   NIcon,
   NInput,
+  NInputNumber,
   NList,
   NListItem,
   NSpace,
@@ -19,8 +20,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { feedbackApi } from '../api/feedback';
+import { flagflowApi } from '../api/flagflow';
 import { productsApi } from '../api/products';
-import type { Feedback, FeedbackStatus, Product } from '../api/types';
+import type { FeatureFlag, Feedback, FeedbackStatus, Product } from '../api/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -30,22 +32,49 @@ const feedbackLoading = ref(false);
 const feedbackSaving = ref(false);
 const feedbackDrawerOpen = ref(false);
 const selectedFeedback = ref<Feedback | null>(null);
+const flagLoading = ref(false);
+const flagSaving = ref(false);
+const flagDrawerOpen = ref(false);
 const product = ref<Product | null>(null);
 const feedbackItems = ref<Feedback[]>([]);
+const flagItems = ref<FeatureFlag[]>([]);
 const productID = computed(() => Number(route.params.id));
 let productLoadVersion = 0;
 let feedbackLoadVersion = 0;
+let flagLoadVersion = 0;
 const feedbackForm = reactive({
   title: '',
   content: ''
+});
+const flagForm = reactive({
+  key: '',
+  name: '',
+  description: '',
+  environment: 'production',
+  rolloutPercentage: 0
 });
 type LoadFeedbackOptions = {
   preserveFeedback?: Feedback;
   clearOnError?: boolean;
 };
+type LoadFlagOptions = {
+  preserveFlag?: FeatureFlag;
+  clearOnError?: boolean;
+};
 const canCreateFeedback = computed(
   () => feedbackForm.title.trim().length > 0 && feedbackForm.content.trim().length > 0
 );
+const canCreateFlag = computed(() => {
+  const rollout = Number(flagForm.rolloutPercentage);
+  return (
+    flagForm.key.trim().length > 0 &&
+    flagForm.name.trim().length > 0 &&
+    flagForm.environment.trim().length > 0 &&
+    Number.isFinite(rollout) &&
+    rollout >= 0 &&
+    rollout <= 100
+  );
+});
 
 onMounted(loadProduct);
 watch(() => route.params.id, loadProduct);
@@ -56,6 +85,11 @@ async function loadProduct() {
   selectedFeedback.value = null;
   product.value = null;
   feedbackItems.value = [];
+  flagItems.value = [];
+  feedbackLoadVersion++;
+  flagLoadVersion++;
+  feedbackLoading.value = false;
+  flagLoading.value = false;
 
   if (!Number.isFinite(requestedProductID)) return;
   loading.value = true;
@@ -63,11 +97,15 @@ async function loadProduct() {
     const loadedProduct = await productsApi.get(requestedProductID);
     if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
     product.value = loadedProduct;
-    await loadFeedback(requestedProductID, { clearOnError: true });
+    await Promise.all([
+      loadFeedback(requestedProductID, { clearOnError: true }),
+      loadFlags(requestedProductID, { clearOnError: true })
+    ]);
   } catch (error) {
     if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
     product.value = null;
     feedbackItems.value = [];
+    flagItems.value = [];
     message.error(error instanceof Error ? error.message : '加载产品详情失败');
   } finally {
     if (isCurrentProductRequest(requestedProductID, requestVersion)) {
@@ -101,6 +139,29 @@ async function loadFeedback(requestedProductID: number, options: LoadFeedbackOpt
   }
 }
 
+async function loadFlags(requestedProductID: number, options: LoadFlagOptions = {}) {
+  if (!Number.isFinite(requestedProductID)) return;
+  const requestVersion = ++flagLoadVersion;
+  flagLoading.value = true;
+  try {
+    const items = await flagflowApi.listByProduct(requestedProductID);
+    if (!isCurrentFlagRequest(requestedProductID, requestVersion)) return;
+    flagItems.value = options.preserveFlag ? preserveFlagItem(items, options.preserveFlag) : items;
+  } catch (error) {
+    if (!isCurrentFlagRequest(requestedProductID, requestVersion)) return;
+    if (options.preserveFlag) {
+      flagItems.value = preserveFlagItem(flagItems.value, options.preserveFlag);
+    } else if (options.clearOnError ?? true) {
+      flagItems.value = [];
+    }
+    message.error(error instanceof Error ? error.message : '加载功能开关失败');
+  } finally {
+    if (isCurrentFlagRequest(requestedProductID, requestVersion)) {
+      flagLoading.value = false;
+    }
+  }
+}
+
 async function createFeedback() {
   if (feedbackSaving.value) return;
   const requestedProductID = productID.value;
@@ -121,9 +182,64 @@ async function createFeedback() {
     selectedFeedback.value = created;
     await loadFeedback(requestedProductID, { preserveFeedback: created, clearOnError: false });
   } catch (error) {
+    if (requestedProductID !== productID.value) return;
     message.error(error instanceof Error ? error.message : '创建反馈失败');
   } finally {
     feedbackSaving.value = false;
+  }
+}
+
+async function createFlag() {
+  if (flagSaving.value) return;
+  const requestedProductID = productID.value;
+  const key = flagForm.key.trim();
+  const name = flagForm.name.trim();
+  const environment = flagForm.environment.trim();
+  const rolloutPercentage = Number(flagForm.rolloutPercentage);
+  if (!Number.isFinite(requestedProductID) || !canCreateFlag.value) {
+    message.warning('请填写开关键、名称和发布比例');
+    return;
+  }
+
+  flagSaving.value = true;
+  try {
+    const created = await flagflowApi.create(requestedProductID, {
+      key,
+      name,
+      description: flagForm.description.trim(),
+      environment,
+      rollout_percentage: rolloutPercentage
+    });
+    if (requestedProductID !== productID.value) return;
+    flagForm.key = '';
+    flagForm.name = '';
+    flagForm.description = '';
+    flagForm.environment = 'production';
+    flagForm.rolloutPercentage = 0;
+    flagDrawerOpen.value = false;
+    await loadFlags(requestedProductID, { preserveFlag: created, clearOnError: false });
+  } catch (error) {
+    if (requestedProductID !== productID.value) return;
+    message.error(error instanceof Error ? error.message : '创建功能开关失败');
+  } finally {
+    flagSaving.value = false;
+  }
+}
+
+async function toggleFlag(flag: FeatureFlag) {
+  if (flagSaving.value) return;
+  const requestedProductID = productID.value;
+  flagSaving.value = true;
+  try {
+    const updated = await flagflowApi.toggle(flag.id, { enabled: !flag.enabled });
+    if (requestedProductID !== productID.value) return;
+    replaceFlagItem(updated);
+    await loadFlags(requestedProductID, { preserveFlag: updated, clearOnError: false });
+  } catch (error) {
+    if (requestedProductID !== productID.value) return;
+    message.error(error instanceof Error ? error.message : '更新功能开关失败');
+  } finally {
+    flagSaving.value = false;
   }
 }
 
@@ -138,6 +254,7 @@ async function setFeedbackStatus(status: FeedbackStatus) {
     selectedFeedback.value = updated;
     await loadFeedback(requestedProductID, { preserveFeedback: updated, clearOnError: false });
   } catch (error) {
+    if (requestedProductID !== productID.value) return;
     message.error(error instanceof Error ? error.message : '更新反馈状态失败');
   } finally {
     feedbackSaving.value = false;
@@ -154,6 +271,16 @@ function replaceFeedbackItem(updated: Feedback) {
   );
 }
 
+function replaceFlagItem(updated: FeatureFlag) {
+  flagItems.value = flagItems.value.map((flag) => (flag.id === updated.id ? updated : flag));
+}
+
+function preserveFlagItem(items: FeatureFlag[], preserved: FeatureFlag) {
+  const hasPreservedItem = items.some((flag) => flag.id === preserved.id);
+  if (!hasPreservedItem) return [preserved, ...items];
+  return items.map((flag) => (flag.id === preserved.id ? preserved : flag));
+}
+
 function preserveFeedbackItem(items: Feedback[], preserved: Feedback) {
   const hasPreservedItem = items.some((feedback) => feedback.id === preserved.id);
   if (!hasPreservedItem) return [preserved, ...items];
@@ -168,6 +295,10 @@ function isCurrentFeedbackRequest(requestedProductID: number, requestVersion: nu
   return requestedProductID === productID.value && requestVersion === feedbackLoadVersion;
 }
 
+function isCurrentFlagRequest(requestedProductID: number, requestVersion: number) {
+  return requestedProductID === productID.value && requestVersion === flagLoadVersion;
+}
+
 function closeFeedbackDetail(show: boolean) {
   if (!show) selectedFeedback.value = null;
 }
@@ -178,6 +309,14 @@ function feedbackStatusType(status?: FeedbackStatus) {
 
 function feedbackStatusLabel(status?: FeedbackStatus) {
   return status === 'resolved' ? '已解决' : '待处理';
+}
+
+function flagStatusType(enabled: boolean) {
+  return enabled ? 'success' : 'default';
+}
+
+function flagStatusLabel(enabled: boolean) {
+  return enabled ? '已开启' : '已关闭';
 }
 
 function formatDate(value?: string) {
@@ -244,6 +383,53 @@ function formatDate(value?: string) {
         </dl>
       </section>
 
+      <section class="content-panel flag-panel">
+        <div class="flag-panel-header">
+          <div>
+            <h3>功能开关</h3>
+            <p>按产品维护灰度开关，支持环境隔离、启停和百分比发布。</p>
+          </div>
+          <n-button type="primary" @click="flagDrawerOpen = true">
+            <template #icon>
+              <n-icon><Plus /></n-icon>
+            </template>
+            新建开关
+          </n-button>
+        </div>
+
+        <n-spin :show="flagLoading">
+          <n-list v-if="flagItems.length > 0" hoverable :bordered="false">
+            <n-list-item v-for="flag in flagItems" :key="flag.id" class="flag-row">
+              <div class="flag-row-main">
+                <div class="flag-row-title">
+                  <strong>{{ flag.name }}</strong>
+                  <code>{{ flag.key }}</code>
+                </div>
+                <p>{{ flag.description || '暂无说明' }}</p>
+                <div class="flag-meta">
+                  <n-tag size="small" :bordered="false">{{ flag.environment }}</n-tag>
+                  <n-tag :type="flagStatusType(flag.enabled)" size="small" :bordered="false">
+                    {{ flagStatusLabel(flag.enabled) }}
+                  </n-tag>
+                  <span>{{ flag.rollout_percentage }}% 发布</span>
+                </div>
+              </div>
+              <n-button
+                size="small"
+                :type="flag.enabled ? 'warning' : 'primary'"
+                :loading="flagSaving"
+                @click="toggleFlag(flag)"
+              >
+                {{ flag.enabled ? '关闭' : '开启' }}
+              </n-button>
+            </n-list-item>
+          </n-list>
+          <div v-if="!flagLoading && flagItems.length === 0" class="empty-state">
+            暂无功能开关。
+          </div>
+        </n-spin>
+      </section>
+
       <section class="content-panel feedback-panel">
         <div class="feedback-panel-header">
           <div>
@@ -284,6 +470,50 @@ function formatDate(value?: string) {
         </n-spin>
       </section>
     </n-spin>
+
+    <n-drawer v-model:show="flagDrawerOpen" width="min(420px, 100vw)" placement="right">
+      <n-drawer-content title="新建功能开关" closable>
+        <n-form label-placement="top" @submit.prevent="createFlag">
+          <n-form-item label="开关键">
+            <n-input v-model:value="flagForm.key" placeholder="例如：new_dashboard" />
+          </n-form-item>
+          <n-form-item label="名称">
+            <n-input v-model:value="flagForm.name" placeholder="例如：新版仪表盘" />
+          </n-form-item>
+          <n-form-item label="环境">
+            <n-input v-model:value="flagForm.environment" placeholder="production" />
+          </n-form-item>
+          <n-form-item label="发布比例">
+            <n-input-number
+              v-model:value="flagForm.rolloutPercentage"
+              :min="0"
+              :max="100"
+              :step="5"
+              style="width: 100%"
+            />
+          </n-form-item>
+          <n-form-item label="说明">
+            <n-input
+              v-model:value="flagForm.description"
+              type="textarea"
+              placeholder="说明这个开关控制的功能或发布计划"
+              :autosize="{ minRows: 4, maxRows: 8 }"
+            />
+          </n-form-item>
+          <n-space justify="end">
+            <n-button @click="flagDrawerOpen = false">取消</n-button>
+            <n-button
+              type="primary"
+              attr-type="submit"
+              :disabled="!canCreateFlag"
+              :loading="flagSaving"
+            >
+              创建
+            </n-button>
+          </n-space>
+        </n-form>
+      </n-drawer-content>
+    </n-drawer>
 
     <n-drawer v-model:show="feedbackDrawerOpen" width="min(420px, 100vw)" placement="right">
       <n-drawer-content title="新建反馈" closable>

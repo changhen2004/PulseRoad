@@ -15,7 +15,10 @@ func newTestRouter(t *testing.T) *gin.Engine {
 
 	gin.SetMode(gin.TestMode)
 	svc, _ := newTestService(t)
+	return newTestRouterWithService(svc)
+}
 
+func newTestRouterWithService(svc *Service) *gin.Engine {
 	r := gin.New()
 	RegisterRoutes(r.Group("/api"), svc)
 	return r
@@ -94,5 +97,25 @@ func TestCurrentUserRequiresToken(t *testing.T) {
 	payload := decodeResponse(t, w)
 	if payload["code"] != float64(401) {
 		t.Fatalf("expected response code 401, got %#v", payload)
+	}
+}
+
+func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
+	repo := newFakeUserRepository()
+	limiter := newFakeLoginLimiter()
+	limiter.blocked["ada@example.com"] = true
+	svc := NewServiceWithLoginLimiter(repo, testJWTSecret, limiter)
+	r := newTestRouterWithService(svc)
+
+	w := performJSON(r, http.MethodPost, "/api/auth/login", gin.H{
+		"email":    "ada@example.com",
+		"password": "password123",
+	}, "")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d with body %s", w.Code, w.Body.String())
+	}
+	payload := decodeResponse(t, w)
+	if payload["code"] != float64(429) {
+		t.Fatalf("expected response code 429, got %#v", payload)
 	}
 }

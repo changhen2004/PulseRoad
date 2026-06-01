@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	ErrEmailAlreadyExists = errors.New("email already exists")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrInvalidInput       = errors.New("invalid input")
-	ErrUnauthorized       = errors.New("unauthorized")
-	ErrUserNotFound       = errors.New("user not found")
+	ErrEmailAlreadyExists   = errors.New("email already exists")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrInvalidInput         = errors.New("invalid input")
+	ErrTooManyLoginAttempts = errors.New("too many login attempts")
+	ErrUnauthorized         = errors.New("unauthorized")
+	ErrUserNotFound         = errors.New("user not found")
 )
 
 type RegisterInput struct {
@@ -36,9 +37,10 @@ type AuthResult struct {
 }
 
 type Service struct {
-	repo      UserRepository
-	jwtSecret []byte
-	tokenTTL  time.Duration
+	repo         UserRepository
+	jwtSecret    []byte
+	tokenTTL     time.Duration
+	loginLimiter LoginLimiter
 }
 
 type UserRepository interface {
@@ -47,16 +49,44 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id uint) (*User, error)
 }
 
+type LoginLimiter interface {
+	Check(ctx context.Context, email string) error
+	RecordFailure(ctx context.Context, email string) error
+	Reset(ctx context.Context, email string) error
+}
+
+type noopLoginLimiter struct{}
+
+func (noopLoginLimiter) Check(context.Context, string) error {
+	return nil
+}
+
+func (noopLoginLimiter) RecordFailure(context.Context, string) error {
+	return nil
+}
+
+func (noopLoginLimiter) Reset(context.Context, string) error {
+	return nil
+}
+
 type claims struct {
 	UserID uint `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
 func NewService(repo UserRepository, jwtSecret string) *Service {
+	return NewServiceWithLoginLimiter(repo, jwtSecret, noopLoginLimiter{})
+}
+
+func NewServiceWithLoginLimiter(repo UserRepository, jwtSecret string, limiter LoginLimiter) *Service {
+	if limiter == nil {
+		limiter = noopLoginLimiter{}
+	}
 	return &Service{
-		repo:      repo,
-		jwtSecret: []byte(jwtSecret),
-		tokenTTL:  24 * time.Hour,
+		repo:         repo,
+		jwtSecret:    []byte(jwtSecret),
+		tokenTTL:     24 * time.Hour,
+		loginLimiter: limiter,
 	}
 }
 
@@ -95,8 +125,15 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (*UserRespo
 
 func (s *Service) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
 	email := normalizeEmail(input.Email)
+	if err := s.loginLimiter.Check(ctx, email); err != nil {
+		return nil, err
+	}
+
 	user, err := s.repo.FindByEmail(ctx, email)
 	if errors.Is(err, ErrUserNotFound) {
+		if recordErr := s.loginLimiter.RecordFailure(ctx, email); recordErr != nil {
+			return nil, recordErr
+		}
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -104,7 +141,14 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*AuthResult, err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+		if recordErr := s.loginLimiter.RecordFailure(ctx, email); recordErr != nil {
+			return nil, recordErr
+		}
 		return nil, ErrInvalidCredentials
+	}
+
+	if err := s.loginLimiter.Reset(ctx, email); err != nil {
+		return nil, err
 	}
 
 	token, err := s.signToken(user.ID)

@@ -70,3 +70,52 @@ export interface CreateFeedbackPayload {
 export interface UpdateFeedbackStatusPayload {
   status: FeedbackStatus;
 }
+
+export interface FeatureFlag {
+  id: number;
+  product_id: number;
+  key: string;
+  name: string;
+  description: string;
+  environment: string;
+  enabled: boolean;
+  rollout_percentage: number;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateFeatureFlagPayload {
+  key: string;
+  name: string;
+  description: string;
+  environment: string;
+  rollout_percentage: number;
+}
+
+export interface UpdateFeatureFlagPayload {
+  key?: string;
+  name?: string;
+  description: string;
+  environment?: string;
+  rollout_percentage: number;
+}
+
+export interface ToggleFeatureFlagPayload {
+  enabled: boolean;
+}
+
+export interface EvaluateFeatureFlagPayload {
+  product_id: number;
+  key: string;
+  environment: string;
+  user_key: string;
+}
+
+export interface EvaluateFeatureFlagResult {
+  key: string;
+  environment: string;
+  enabled: boolean;
+  rollout_percentage: number;
+  reason: string;
+}
