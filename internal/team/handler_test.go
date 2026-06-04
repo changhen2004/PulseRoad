@@ -26,7 +26,10 @@ func (p staticTokenParser) ParseToken(token string) (uint, error) {
 
 func newTeamTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	svc := NewService(newFakeTeamRepository())
+	repo := newFakeTeamRepository()
+	repo.usersByEmail["owner@example.com"] = UserBrief{ID: 7, Email: "owner@example.com", Name: "Owner"}
+	repo.usersByEmail["member@example.com"] = UserBrief{ID: 8, Email: "member@example.com", Name: "Member"}
+	svc := NewService(repo)
 	parser := staticTokenParser{users: map[string]uint{
 		"user-7": 7,
 		"user-8": 8,
@@ -123,6 +126,49 @@ func TestTeamHTTPRejectsNonMemberDetail(t *testing.T) {
 	getResp := performTeamJSON(r, http.MethodGet, "/api/teams/"+strconvID(teamID), nil, "user-8")
 	if getResp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d with body %s", getResp.Code, getResp.Body.String())
+	}
+}
+
+func TestTeamHTTPInviteAcceptAndListMembers(t *testing.T) {
+	r := newTeamTestRouter()
+
+	createResp := performTeamJSON(r, http.MethodPost, "/api/teams", gin.H{"name": "Core"}, "user-7")
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", createResp.Code, createResp.Body.String())
+	}
+	payload := decodeTeamResponse(t, createResp)
+	teamID := uint(payload["data"].(map[string]any)["id"].(float64))
+
+	inviteResp := performTeamJSON(r, http.MethodPost, "/api/teams/"+strconvID(teamID)+"/invitations", gin.H{
+		"email": "member@example.com",
+		"role":  RoleMember,
+	}, "user-7")
+	if inviteResp.Code != http.StatusOK {
+		t.Fatalf("invite status = %d, body = %s", inviteResp.Code, inviteResp.Body.String())
+	}
+	invitationID := uint(decodeTeamResponse(t, inviteResp)["data"].(map[string]any)["id"].(float64))
+
+	listInvitesResp := performTeamJSON(r, http.MethodGet, "/api/teams/invitations", nil, "user-8")
+	if listInvitesResp.Code != http.StatusOK {
+		t.Fatalf("list invitations status = %d, body = %s", listInvitesResp.Code, listInvitesResp.Body.String())
+	}
+	invitations := decodeTeamResponse(t, listInvitesResp)["data"].([]any)
+	if len(invitations) != 1 {
+		t.Fatalf("expected one pending invitation, got %#v", invitations)
+	}
+
+	acceptResp := performTeamJSON(r, http.MethodPost, "/api/teams/invitations/"+strconvID(invitationID)+"/accept", nil, "user-8")
+	if acceptResp.Code != http.StatusOK {
+		t.Fatalf("accept status = %d, body = %s", acceptResp.Code, acceptResp.Body.String())
+	}
+
+	membersResp := performTeamJSON(r, http.MethodGet, "/api/teams/"+strconvID(teamID)+"/members", nil, "user-7")
+	if membersResp.Code != http.StatusOK {
+		t.Fatalf("members status = %d, body = %s", membersResp.Code, membersResp.Body.String())
+	}
+	members := decodeTeamResponse(t, membersResp)["data"].([]any)
+	if len(members) != 2 {
+		t.Fatalf("expected two members, got %#v", members)
 	}
 }
 

@@ -7,7 +7,8 @@ function fakeApiClient(): ApiClient {
   return {
     get: vi.fn(),
     post: vi.fn(),
-    patch: vi.fn()
+    patch: vi.fn(),
+    delete: vi.fn()
   };
 }
 
@@ -31,6 +32,15 @@ describe('feedback api', () => {
     expect(client.get).toHaveBeenCalledWith('/products/7/feedback');
   });
 
+  it('lists feedback with filters and pagination', () => {
+    const client = fakeApiClient();
+    const api = createFeedbackApi(client);
+
+    api.listByProduct(7, { status: 'open', page: 2, page_size: 10 });
+
+    expect(client.get).toHaveBeenCalledWith('/products/7/feedback?page=2&page_size=10&status=open');
+  });
+
   it('gets feedback by id', () => {
     const client = fakeApiClient();
     const api = createFeedbackApi(client);
@@ -48,5 +58,18 @@ describe('feedback api', () => {
     api.updateStatus(11, payload);
 
     expect(client.patch).toHaveBeenCalledWith('/feedback/11/status', payload);
+  });
+
+  it('creates comments and toggles votes', () => {
+    const client = fakeApiClient();
+    const api = createFeedbackApi(client);
+
+    api.createComment(11, { content: 'I need this too' });
+    api.vote(11);
+    api.unvote(11);
+
+    expect(client.post).toHaveBeenCalledWith('/feedback/11/comments', { content: 'I need this too' });
+    expect(client.post).toHaveBeenCalledWith('/feedback/11/vote');
+    expect(client.delete).toHaveBeenCalledWith('/feedback/11/vote');
   });
 });

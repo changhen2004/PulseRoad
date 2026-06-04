@@ -10,14 +10,20 @@ import (
 )
 
 type fakeFeedbackRepository struct {
-	nextID   uint
-	feedback map[uint]*Feedback
+	nextID        uint
+	nextCommentID uint
+	feedback      map[uint]*Feedback
+	comments      map[uint][]FeedbackComment
+	votes         map[uint]map[uint]*FeedbackVote
 }
 
 func newFakeFeedbackRepository() *fakeFeedbackRepository {
 	return &fakeFeedbackRepository{
-		nextID:   1,
-		feedback: make(map[uint]*Feedback),
+		nextID:        1,
+		nextCommentID: 1,
+		feedback:      make(map[uint]*Feedback),
+		comments:      make(map[uint][]FeedbackComment),
+		votes:         make(map[uint]map[uint]*FeedbackVote),
 	}
 }
 
@@ -42,6 +48,42 @@ func (r *fakeFeedbackRepository) ListByProduct(_ context.Context, productID uint
 	return items, nil
 }
 
+func (r *fakeFeedbackRepository) ListByProductPage(_ context.Context, productID uint, query ListFeedbackQuery) (FeedbackPage, error) {
+	var filtered []Feedback
+	for _, feedback := range r.feedback {
+		if feedback.ProductID != productID {
+			continue
+		}
+		if query.Status != "" && feedback.Status != query.Status {
+			continue
+		}
+		item := *feedback
+		item.CommentCount = int64(len(r.comments[feedback.ID]))
+		item.VoteCount = int64(len(r.votes[feedback.ID]))
+		if r.votes[feedback.ID] != nil && r.votes[feedback.ID][query.UserID] != nil {
+			item.Voted = true
+		}
+		filtered = append(filtered, item)
+	}
+	page := query.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	start := (page - 1) * pageSize
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return FeedbackPage{Items: filtered[start:end], Total: int64(len(filtered)), Page: page, PageSize: pageSize}, nil
+}
+
 func (r *fakeFeedbackRepository) FindByID(_ context.Context, id uint) (*Feedback, error) {
 	feedback, ok := r.feedback[id]
 	if !ok {
@@ -60,6 +102,45 @@ func (r *fakeFeedbackRepository) UpdateStatus(_ context.Context, id uint, status
 	feedback.UpdatedAt = time.Now()
 	copy := *feedback
 	return &copy, nil
+}
+
+func (r *fakeFeedbackRepository) CreateComment(_ context.Context, comment *FeedbackComment) error {
+	comment.ID = r.nextCommentID
+	comment.CreatedAt = time.Now()
+	r.nextCommentID++
+	copyComment := *comment
+	r.comments[comment.FeedbackID] = append(r.comments[comment.FeedbackID], copyComment)
+	return nil
+}
+
+func (r *fakeFeedbackRepository) ListComments(_ context.Context, feedbackID uint) ([]FeedbackComment, error) {
+	return append([]FeedbackComment(nil), r.comments[feedbackID]...), nil
+}
+
+func (r *fakeFeedbackRepository) CreateVote(_ context.Context, vote *FeedbackVote) error {
+	if r.votes[vote.FeedbackID] == nil {
+		r.votes[vote.FeedbackID] = make(map[uint]*FeedbackVote)
+	}
+	if _, ok := r.votes[vote.FeedbackID][vote.UserID]; ok {
+		return ErrVoteExists
+	}
+	vote.ID = uint(len(r.votes[vote.FeedbackID]) + 1)
+	vote.CreatedAt = time.Now()
+	copyVote := *vote
+	r.votes[vote.FeedbackID][vote.UserID] = &copyVote
+	return nil
+}
+
+func (r *fakeFeedbackRepository) DeleteVote(_ context.Context, feedbackID uint, userID uint) error {
+	if r.votes[feedbackID] == nil || r.votes[feedbackID][userID] == nil {
+		return ErrVoteNotFound
+	}
+	delete(r.votes[feedbackID], userID)
+	return nil
+}
+
+func (r *fakeFeedbackRepository) CountVotes(_ context.Context, feedbackID uint) (int64, error) {
+	return int64(len(r.votes[feedbackID])), nil
 }
 
 type fakeProductAccess struct {
@@ -320,5 +401,100 @@ func TestUpdateStatus(t *testing.T) {
 	_, err = svc.UpdateStatus(context.Background(), 7, created.ID, UpdateFeedbackStatusInput{Status: "closed"})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected ErrInvalid, got %v", err)
+	}
+}
+
+func TestListFeedbackSupportsStatusFilterPaginationAndVoteMetadata(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+
+	first, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "A", Content: "A content"})
+	if err != nil {
+		t.Fatalf("create first feedback: %v", err)
+	}
+	if _, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "B", Content: "B content"}); err != nil {
+		t.Fatalf("create second feedback: %v", err)
+	}
+	if _, err := svc.UpdateStatus(context.Background(), 7, first.ID, UpdateFeedbackStatusInput{Status: StatusResolved}); err != nil {
+		t.Fatalf("resolve first feedback: %v", err)
+	}
+	if _, err := svc.VoteFeedback(context.Background(), 7, first.ID); err != nil {
+		t.Fatalf("vote feedback: %v", err)
+	}
+
+	page, err := svc.ListFeedbackPage(context.Background(), 7, 10, ListFeedbackInput{Status: StatusResolved, Page: 1, PageSize: 1})
+	if err != nil {
+		t.Fatalf("list feedback page: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != first.ID {
+		t.Fatalf("unexpected page: %#v", page)
+	}
+	if page.Items[0].VoteCount != 1 || !page.Items[0].Voted {
+		t.Fatalf("expected vote metadata, got %#v", page.Items[0])
+	}
+}
+
+func TestCreateAndListCommentsRequireProductMember(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "A", Content: "A content"})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	comment, err := svc.CreateComment(context.Background(), 7, created.ID, CreateCommentInput{Content: "I need this too"})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if comment.ID == 0 || comment.Content != "I need this too" || comment.CreatedBy != 7 {
+		t.Fatalf("unexpected comment: %#v", comment)
+	}
+
+	comments, err := svc.ListComments(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments) != 1 || comments[0].ID != comment.ID {
+		t.Fatalf("unexpected comments: %#v", comments)
+	}
+}
+
+func TestVoteFeedbackIsIdempotentAndCanBeCanceled(t *testing.T) {
+	access := newFakeProductAccess()
+	access.addProduct(10, 20)
+	access.addMember(10, 7)
+	repo := newFakeFeedbackRepository()
+	svc := NewService(repo, access)
+	created, err := svc.CreateFeedback(context.Background(), 7, 10, CreateFeedbackInput{Title: "A", Content: "A content"})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	result, err := svc.VoteFeedback(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("vote feedback: %v", err)
+	}
+	if !result.Voted || result.VoteCount != 1 {
+		t.Fatalf("expected voted result, got %#v", result)
+	}
+	result, err = svc.VoteFeedback(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("repeat vote feedback: %v", err)
+	}
+	if !result.Voted || result.VoteCount != 1 {
+		t.Fatalf("expected idempotent voted result, got %#v", result)
+	}
+	result, err = svc.UnvoteFeedback(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("unvote feedback: %v", err)
+	}
+	if result.Voted || result.VoteCount != 0 {
+		t.Fatalf("expected canceled vote result, got %#v", result)
 	}
 }

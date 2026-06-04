@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"pulseroad/internal/feedback"
 	"pulseroad/internal/flagflow"
@@ -24,7 +25,7 @@ func StartWorker(cfg *config.Config) {
 		log.Fatalf("invalid rabbitmq config: %v", err)
 	}
 
-	rabbitClient, err := rabbitmq.Dial(cfg.RabbitMQ.URL)
+	rabbitClient, err := rabbitmq.DialWithRetry(context.Background(), cfg.RabbitMQ.URL, 30, time.Second)
 	if err != nil {
 		log.Fatalf("failed to connect rabbitmq: %v", err)
 	}

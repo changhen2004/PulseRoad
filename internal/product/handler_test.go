@@ -103,6 +103,16 @@ func TestProductHTTPCreateListAndGet(t *testing.T) {
 	if detail["id"] != float64(productID) || detail["team_id"] != float64(10) {
 		t.Fatalf("unexpected detail response: %#v", detail)
 	}
+
+	summaryResp := performProductJSON(r, http.MethodGet, "/api/products/"+strconvID(productID)+"/summary", nil, "user-7")
+	if summaryResp.Code != http.StatusOK {
+		t.Fatalf("summary status = %d, body = %s", summaryResp.Code, summaryResp.Body.String())
+	}
+	summary := decodeProductResponse(t, summaryResp)["data"].(map[string]any)
+	productSummary := summary["product"].(map[string]any)
+	if productSummary["id"] != float64(productID) || summary["feedback_total"] != float64(0) {
+		t.Fatalf("unexpected summary response: %#v", summary)
+	}
 }
 
 func TestProductHTTPRequiresAuthentication(t *testing.T) {

@@ -3,7 +3,9 @@ package rabbitmq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -36,6 +38,44 @@ func TestValidateURLAcceptsAMQPURL(t *testing.T) {
 func TestValidateURLRejectsInvalidURL(t *testing.T) {
 	if err := ValidateURL("http://127.0.0.1:5672/"); err == nil {
 		t.Fatal("expected invalid rabbitmq url error")
+	}
+}
+
+func TestDialWithRetryRetriesUntilDialerSucceeds(t *testing.T) {
+	attempts := 0
+	client, err := dialWithRetry(
+		context.Background(),
+		"amqp://guest:guest@127.0.0.1:5672/",
+		3,
+		time.Nanosecond,
+		func(string) (*Client, error) {
+			attempts++
+			if attempts < 3 {
+				return nil, errors.New("connection refused")
+			}
+			return &Client{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dial with retry: %v", err)
+	}
+	if client == nil || attempts != 3 {
+		t.Fatalf("expected success on third attempt, client=%#v attempts=%d", client, attempts)
+	}
+}
+
+func TestDialWithRetryReturnsLastErrorAfterAttempts(t *testing.T) {
+	_, err := dialWithRetry(
+		context.Background(),
+		"amqp://guest:guest@127.0.0.1:5672/",
+		2,
+		time.Nanosecond,
+		func(string) (*Client, error) {
+			return nil, errors.New("connection refused")
+		},
+	)
+	if err == nil {
+		t.Fatal("expected retry error")
 	}
 }
 

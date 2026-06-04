@@ -21,6 +21,7 @@ type RepositoryPort interface {
 	Create(ctx context.Context, product *Product) error
 	ListByTeam(ctx context.Context, teamID uint) ([]Product, error)
 	FindByID(ctx context.Context, id uint) (*Product, error)
+	SummaryStats(ctx context.Context, productID uint) (*ProductSummaryStats, error)
 }
 
 type TeamMembership interface {
@@ -98,6 +99,27 @@ func (s *Service) GetProduct(ctx context.Context, userID uint, productID uint) (
 
 	response := product.ToResponse()
 	return &response, nil
+}
+
+func (s *Service) GetProductSummary(ctx context.Context, userID uint, productID uint) (*ProductSummaryResponse, error) {
+	if userID == 0 || productID == 0 {
+		return nil, ErrForbidden
+	}
+	product, err := s.repo.FindByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireMember(ctx, userID, product.TeamID); err != nil {
+		return nil, err
+	}
+	stats, err := s.repo.SummaryStats(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	return &ProductSummaryResponse{
+		Product:             product.ToResponse(),
+		ProductSummaryStats: *stats,
+	}, nil
 }
 
 func (s *Service) requireMember(ctx context.Context, userID uint, teamID uint) error {

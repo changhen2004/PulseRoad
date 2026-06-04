@@ -90,7 +90,7 @@ func TestFeedbackHTTPCreateListGetAndUpdateStatus(t *testing.T) {
 		t.Fatalf("list status = %d, body = %s", listResp.Code, listResp.Body.String())
 	}
 	listPayload := decodeFeedbackResponse(t, listResp)
-	list := listPayload["data"].([]any)
+	list := listPayload["data"].(map[string]any)["items"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("expected one feedback item, got %#v", list)
 	}
@@ -174,6 +174,58 @@ func TestFeedbackHTTPRejectsInvalidStatus(t *testing.T) {
 	}, "user-7")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d with body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestFeedbackHTTPCommentsVotesAndFilteredPage(t *testing.T) {
+	r := newFeedbackTestRouter()
+
+	createResp := performFeedbackJSON(r, http.MethodPost, "/api/products/10/feedback", gin.H{
+		"title":   "Missing export",
+		"content": "CSV export would help.",
+	}, "user-7")
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", createResp.Code, createResp.Body.String())
+	}
+	feedbackID := uint(decodeFeedbackResponse(t, createResp)["data"].(map[string]any)["id"].(float64))
+
+	commentResp := performFeedbackJSON(r, http.MethodPost, "/api/feedback/"+strconvFeedbackID(feedbackID)+"/comments", gin.H{
+		"content": "I need this too",
+	}, "user-7")
+	if commentResp.Code != http.StatusOK {
+		t.Fatalf("comment status = %d, body = %s", commentResp.Code, commentResp.Body.String())
+	}
+
+	voteResp := performFeedbackJSON(r, http.MethodPost, "/api/feedback/"+strconvFeedbackID(feedbackID)+"/vote", nil, "user-7")
+	if voteResp.Code != http.StatusOK {
+		t.Fatalf("vote status = %d, body = %s", voteResp.Code, voteResp.Body.String())
+	}
+	vote := decodeFeedbackResponse(t, voteResp)["data"].(map[string]any)
+	if vote["voted"] != true || vote["vote_count"] != float64(1) {
+		t.Fatalf("unexpected vote response: %#v", vote)
+	}
+
+	commentsResp := performFeedbackJSON(r, http.MethodGet, "/api/feedback/"+strconvFeedbackID(feedbackID)+"/comments", nil, "user-7")
+	if commentsResp.Code != http.StatusOK {
+		t.Fatalf("comments status = %d, body = %s", commentsResp.Code, commentsResp.Body.String())
+	}
+	comments := decodeFeedbackResponse(t, commentsResp)["data"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("expected one comment, got %#v", comments)
+	}
+
+	pageResp := performFeedbackJSON(r, http.MethodGet, "/api/products/10/feedback?status=open&page=1&page_size=10", nil, "user-7")
+	if pageResp.Code != http.StatusOK {
+		t.Fatalf("page status = %d, body = %s", pageResp.Code, pageResp.Body.String())
+	}
+	page := decodeFeedbackResponse(t, pageResp)["data"].(map[string]any)
+	items := page["items"].([]any)
+	if page["total"] != float64(1) || len(items) != 1 {
+		t.Fatalf("unexpected page: %#v", page)
+	}
+	item := items[0].(map[string]any)
+	if item["vote_count"] != float64(1) || item["comment_count"] != float64(1) || item["voted"] != true {
+		t.Fatalf("unexpected feedback metadata: %#v", item)
 	}
 }
 

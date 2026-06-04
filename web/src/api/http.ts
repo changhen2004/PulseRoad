@@ -22,6 +22,7 @@ export interface ApiClient {
   get<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
   post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
   patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
+  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
 }
 
 export const apiEvents = {
@@ -57,6 +58,9 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     },
     patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig) {
       return request<T>(instance, { ...config, method: 'PATCH', url, data }, unauthorized);
+    },
+    delete<T>(url: string, config?: AxiosRequestConfig) {
+      return request<T>(instance, { ...config, method: 'DELETE', url }, unauthorized);
     }
   };
 }

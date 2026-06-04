@@ -15,6 +15,8 @@ var (
 	ErrInvalid          = errors.New("invalid input")
 	ErrFeedbackNotFound = errors.New("feedback not found")
 	ErrProductNotFound  = errors.New("product not found")
+	ErrVoteExists       = errors.New("vote already exists")
+	ErrVoteNotFound     = errors.New("vote not found")
 )
 
 type CreateFeedbackInput struct {
@@ -26,11 +28,41 @@ type UpdateFeedbackStatusInput struct {
 	Status string `json:"status"`
 }
 
+type ListFeedbackInput struct {
+	Status   string
+	Page     int
+	PageSize int
+}
+
+type CreateCommentInput struct {
+	Content string `json:"content"`
+}
+
+type ListFeedbackQuery struct {
+	Status   string
+	Page     int
+	PageSize int
+	UserID   uint
+}
+
+type FeedbackPage struct {
+	Items    []Feedback
+	Page     int
+	PageSize int
+	Total    int64
+}
+
 type RepositoryPort interface {
 	Create(ctx context.Context, feedback *Feedback) error
 	ListByProduct(ctx context.Context, productID uint) ([]Feedback, error)
+	ListByProductPage(ctx context.Context, productID uint, query ListFeedbackQuery) (FeedbackPage, error)
 	FindByID(ctx context.Context, id uint) (*Feedback, error)
 	UpdateStatus(ctx context.Context, id uint, status string) (*Feedback, error)
+	CreateComment(ctx context.Context, comment *FeedbackComment) error
+	ListComments(ctx context.Context, feedbackID uint) ([]FeedbackComment, error)
+	CreateVote(ctx context.Context, vote *FeedbackVote) error
+	DeleteVote(ctx context.Context, feedbackID uint, userID uint) error
+	CountVotes(ctx context.Context, feedbackID uint) (int64, error)
 }
 
 type ProductAccess interface {
@@ -134,6 +166,40 @@ func (s *Service) ListFeedback(ctx context.Context, userID uint, productID uint)
 	return response, nil
 }
 
+func (s *Service) ListFeedbackPage(ctx context.Context, userID uint, productID uint, input ListFeedbackInput) (*FeedbackPageResponse, error) {
+	if userID == 0 || productID == 0 {
+		return nil, ErrForbidden
+	}
+	status := strings.TrimSpace(input.Status)
+	if status != "" && !validStatus(status) {
+		return nil, ErrInvalid
+	}
+	if err := s.requireProductAccess(ctx, userID, productID); err != nil {
+		return nil, err
+	}
+	page := normalizePage(input.Page)
+	pageSize := normalizePageSize(input.PageSize)
+	feedbackPage, err := s.repo.ListByProductPage(ctx, productID, ListFeedbackQuery{
+		Status:   status,
+		Page:     page,
+		PageSize: pageSize,
+		UserID:   userID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]FeedbackResponse, 0, len(feedbackPage.Items))
+	for _, feedback := range feedbackPage.Items {
+		items = append(items, feedback.ToResponse())
+	}
+	return &FeedbackPageResponse{
+		Items:    items,
+		Page:     feedbackPage.Page,
+		PageSize: feedbackPage.PageSize,
+		Total:    feedbackPage.Total,
+	}, nil
+}
+
 func (s *Service) GetFeedback(ctx context.Context, userID uint, feedbackID uint) (*FeedbackResponse, error) {
 	if userID == 0 || feedbackID == 0 {
 		return nil, ErrForbidden
@@ -180,6 +246,89 @@ func (s *Service) UpdateStatus(ctx context.Context, userID uint, feedbackID uint
 	return &response, nil
 }
 
+func (s *Service) CreateComment(ctx context.Context, userID uint, feedbackID uint, input CreateCommentInput) (*FeedbackCommentResponse, error) {
+	content := strings.TrimSpace(input.Content)
+	if userID == 0 || feedbackID == 0 || content == "" {
+		return nil, ErrInvalid
+	}
+	feedback, err := s.feedbackForUser(ctx, userID, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	comment := &FeedbackComment{
+		FeedbackID: feedback.ID,
+		Content:    content,
+		CreatedBy:  userID,
+	}
+	if err := s.repo.CreateComment(ctx, comment); err != nil {
+		return nil, err
+	}
+	response := comment.ToResponse()
+	return &response, nil
+}
+
+func (s *Service) ListComments(ctx context.Context, userID uint, feedbackID uint) ([]FeedbackCommentResponse, error) {
+	feedback, err := s.feedbackForUser(ctx, userID, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	comments, err := s.repo.ListComments(ctx, feedback.ID)
+	if err != nil {
+		return nil, err
+	}
+	response := make([]FeedbackCommentResponse, 0, len(comments))
+	for _, comment := range comments {
+		response = append(response, comment.ToResponse())
+	}
+	return response, nil
+}
+
+func (s *Service) VoteFeedback(ctx context.Context, userID uint, feedbackID uint) (*FeedbackVoteResponse, error) {
+	feedback, err := s.feedbackForUser(ctx, userID, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	err = s.repo.CreateVote(ctx, &FeedbackVote{FeedbackID: feedback.ID, UserID: userID})
+	if err != nil && !errors.Is(err, ErrVoteExists) {
+		return nil, err
+	}
+	return s.voteResponse(ctx, userID, *feedback, true)
+}
+
+func (s *Service) UnvoteFeedback(ctx context.Context, userID uint, feedbackID uint) (*FeedbackVoteResponse, error) {
+	feedback, err := s.feedbackForUser(ctx, userID, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	err = s.repo.DeleteVote(ctx, feedback.ID, userID)
+	if err != nil && !errors.Is(err, ErrVoteNotFound) {
+		return nil, err
+	}
+	return s.voteResponse(ctx, userID, *feedback, false)
+}
+
+func (s *Service) feedbackForUser(ctx context.Context, userID uint, feedbackID uint) (*Feedback, error) {
+	if userID == 0 || feedbackID == 0 {
+		return nil, ErrForbidden
+	}
+	feedback, err := s.repo.FindByID(ctx, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireProductAccess(ctx, userID, feedback.ProductID); err != nil {
+		return nil, err
+	}
+	return feedback, nil
+}
+
+func (s *Service) voteResponse(ctx context.Context, userID uint, feedback Feedback, voted bool) (*FeedbackVoteResponse, error) {
+	count, err := s.repo.CountVotes(ctx, feedback.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &FeedbackVoteResponse{FeedbackID: feedback.ID, Voted: voted, VoteCount: count}, nil
+}
+
 func (s *Service) requireProductAccess(ctx context.Context, userID uint, productID uint) error {
 	_, err := s.productForUser(ctx, userID, productID)
 	return err
@@ -198,4 +347,21 @@ func (s *Service) productForUser(ctx context.Context, userID uint, productID uin
 
 func validStatus(status string) bool {
 	return status == StatusOpen || status == StatusResolved
+}
+
+func normalizePage(page int) int {
+	if page < 1 {
+		return 1
+	}
+	return page
+}
+
+func normalizePageSize(pageSize int) int {
+	if pageSize < 1 {
+		return 20
+	}
+	if pageSize > 100 {
+		return 100
+	}
+	return pageSize
 }

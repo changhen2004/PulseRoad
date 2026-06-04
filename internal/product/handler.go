@@ -90,6 +90,28 @@ func (h *Handler) Get(c *gin.Context) {
 	response.Success(c, product)
 }
 
+func (h *Handler) Summary(c *gin.Context) {
+	userID, ok := middleware.CurrentUserID(c)
+	if !ok {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	productID, ok := parseUintParam(c, "id")
+	if !ok {
+		response.BadRequest(c, "invalid product id")
+		return
+	}
+
+	summary, err := h.service.GetProductSummary(c.Request.Context(), userID, productID)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+
+	response.Success(c, summary)
+}
+
 func (h *Handler) writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrInvalid):

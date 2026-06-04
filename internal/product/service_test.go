@@ -8,14 +8,16 @@ import (
 )
 
 type fakeProductRepository struct {
-	nextID   uint
-	products map[uint]*Product
+	nextID    uint
+	products  map[uint]*Product
+	summaries map[uint]ProductSummaryStats
 }
 
 func newFakeProductRepository() *fakeProductRepository {
 	return &fakeProductRepository{
-		nextID:   1,
-		products: make(map[uint]*Product),
+		nextID:    1,
+		products:  make(map[uint]*Product),
+		summaries: make(map[uint]ProductSummaryStats),
 	}
 }
 
@@ -47,6 +49,11 @@ func (r *fakeProductRepository) FindByID(_ context.Context, id uint) (*Product, 
 	}
 	copy := *product
 	return &copy, nil
+}
+
+func (r *fakeProductRepository) SummaryStats(_ context.Context, productID uint) (*ProductSummaryStats, error) {
+	stats := r.summaries[productID]
+	return &stats, nil
 }
 
 type fakeTeamMembership struct {
@@ -150,5 +157,38 @@ func TestGetProductRejectsNonMember(t *testing.T) {
 	}
 	if product.ID != created.ID || product.TeamID != 10 {
 		t.Fatalf("unexpected product detail: %#v", product)
+	}
+}
+
+func TestGetProductSummaryRequiresTeamMember(t *testing.T) {
+	membership := newFakeTeamMembership()
+	membership.add(10, 7)
+	repo := newFakeProductRepository()
+	svc := NewService(repo, membership)
+	created, err := svc.CreateProduct(context.Background(), 7, 10, CreateProductInput{Name: "PulseRoad"})
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	repo.summaries[created.ID] = ProductSummaryStats{
+		FeedbackTotal:    4,
+		FeedbackOpen:     3,
+		FeedbackResolved: 1,
+		CommentTotal:     6,
+		VoteTotal:        9,
+		FlagTotal:        2,
+		FlagEnabled:      1,
+	}
+
+	summary, err := svc.GetProductSummary(context.Background(), 7, created.ID)
+	if err != nil {
+		t.Fatalf("get product summary: %v", err)
+	}
+	if summary.Product.ID != created.ID || summary.FeedbackTotal != 4 || summary.FlagEnabled != 1 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+
+	_, err = svc.GetProductSummary(context.Background(), 8, created.ID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
 }

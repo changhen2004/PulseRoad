@@ -1,7 +1,14 @@
 import { createApp, defineComponent, h, nextTick, reactive, type App } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { FeatureFlag, Feedback, Product, UpdateFeedbackStatusPayload } from '../api/types';
+import type {
+  FeatureFlag,
+  Feedback,
+  FeedbackPage,
+  Product,
+  ProductSummary,
+  UpdateFeedbackStatusPayload
+} from '../api/types';
 
 function product(id: number): Product {
   return {
@@ -14,6 +21,19 @@ function product(id: number): Product {
   };
 }
 
+function productSummary(id: number): ProductSummary {
+  return {
+    product: product(id),
+    feedback_total: 0,
+    feedback_open: 0,
+    feedback_resolved: 0,
+    comment_total: 0,
+    vote_total: 0,
+    flag_total: 0,
+    flag_enabled: 0
+  };
+}
+
 function feedback(id: number, overrides: Partial<Feedback> = {}): Feedback {
   return {
     id,
@@ -22,6 +42,9 @@ function feedback(id: number, overrides: Partial<Feedback> = {}): Feedback {
     content: 'stale feedback content',
     status: 'open',
     created_by: 1,
+    vote_count: 0,
+    comment_count: 0,
+    voted: false,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides
@@ -82,11 +105,23 @@ async function flushView() {
   await nextTick();
   await Promise.resolve();
   await nextTick();
+  await Promise.resolve();
+  await nextTick();
+}
+
+function feedbackPage(items: Feedback[]): FeedbackPage {
+  return {
+    items,
+    page: 1,
+    page_size: 10,
+    total: items.length
+  };
 }
 
 interface ViewMocks {
   productGet: ReturnType<typeof vi.fn<(id: number) => Promise<Product>>>;
-  listByProduct: ReturnType<typeof vi.fn<(productID: number) => Promise<Feedback[]>>>;
+  productSummaryGet: ReturnType<typeof vi.fn<(id: number) => Promise<ProductSummary>>>;
+  listByProduct: ReturnType<typeof vi.fn<(productID: number) => Promise<FeedbackPage>>>;
   listFlagsByProduct: ReturnType<typeof vi.fn<(productID: number) => Promise<FeatureFlag[]>>>;
   toggleFlag: ReturnType<typeof vi.fn<(id: number, payload: { enabled: boolean }) => Promise<FeatureFlag>>>;
   updateStatus: ReturnType<
@@ -101,26 +136,31 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
   const router = { push: vi.fn() };
   const message = { error: vi.fn(), warning: vi.fn() };
   const productGet = vi.fn<(id: number) => Promise<Product>>();
-  const listByProduct = vi.fn<(productID: number) => Promise<Feedback[]>>();
+  const productSummaryGet = vi.fn<(id: number) => Promise<ProductSummary>>();
+  const listByProduct = vi.fn<(productID: number) => Promise<FeedbackPage>>();
   const listFlagsByProduct = vi.fn<(productID: number) => Promise<FeatureFlag[]>>();
   const toggleFlag = vi.fn<(id: number, payload: { enabled: boolean }) => Promise<FeatureFlag>>();
   const updateStatus =
     vi.fn<(id: number, payload: UpdateFeedbackStatusPayload) => Promise<Feedback>>();
+  productSummaryGet.mockImplementation(async (id) => productSummary(id));
   listFlagsByProduct.mockResolvedValue([]);
-  configure({ productGet, listByProduct, listFlagsByProduct, toggleFlag, updateStatus });
+  configure({ productGet, productSummaryGet, listByProduct, listFlagsByProduct, toggleFlag, updateStatus });
 
   vi.doMock('vue-router', () => ({
     useRoute: () => route,
     useRouter: () => router
   }));
   vi.doMock('../api/products', () => ({
-    productsApi: { get: productGet }
+    productsApi: { get: productGet, summary: productSummaryGet }
   }));
   vi.doMock('../api/feedback', () => ({
     feedbackApi: {
       create: vi.fn(),
       get: vi.fn(),
       listByProduct,
+      listComments: vi.fn().mockResolvedValue([]),
+      vote: vi.fn(),
+      unvote: vi.fn(),
       updateStatus
     }
   }));
@@ -159,7 +199,17 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
   app.mount(root);
   await flushView();
 
-  return { app, root, route, productGet, listByProduct, listFlagsByProduct, toggleFlag, updateStatus };
+  return {
+    app,
+    root,
+    route,
+    productGet,
+    productSummaryGet,
+    listByProduct,
+    listFlagsByProduct,
+    toggleFlag,
+    updateStatus
+  };
 }
 
 afterEach(() => {
@@ -177,7 +227,7 @@ describe('ProductDetailView feedback state', () => {
     const mounted = await mountView(({ productGet, listByProduct }) => {
       productGet.mockImplementation(async (id) => product(id));
       listByProduct.mockImplementation(async (productID) => {
-        if (productID === 1) return [feedback(10)];
+        if (productID === 1) return feedbackPage([feedback(10)]);
         throw new Error('feedback unavailable');
       });
     });
@@ -205,13 +255,13 @@ describe('ProductDetailView feedback state', () => {
         if (id === 1) return firstProduct.promise;
         return Promise.resolve(product(id));
       });
-      listByProduct.mockImplementation(async (productID) => [
-        feedback(productID, {
+      listByProduct.mockImplementation(async (productID) =>
+        feedbackPage([feedback(productID, {
           product_id: productID,
           title: `Feedback ${productID}`,
           content: `feedback for product ${productID}`
-        })
-      ]);
+        })])
+      );
     });
     let app: App<Element> | undefined = mounted.app;
 
@@ -240,7 +290,7 @@ describe('ProductDetailView feedback state', () => {
     const resolvedFeedback = feedback(10, { status: 'resolved' });
     const mounted = await mountView(({ productGet, listByProduct, updateStatus }) => {
       productGet.mockImplementation(async (id) => product(id));
-      listByProduct.mockResolvedValue([openFeedback]);
+      listByProduct.mockResolvedValue(feedbackPage([openFeedback]));
       updateStatus.mockResolvedValue(resolvedFeedback);
     });
     let app: App<Element> | undefined = mounted.app;
@@ -256,8 +306,9 @@ describe('ProductDetailView feedback state', () => {
       await flushView();
 
       expect(mounted.updateStatus).toHaveBeenCalledWith(10, { status: 'resolved' });
-      expect(mounted.root.textContent).toContain('已解决');
-      expect(mounted.root.textContent).not.toContain('待处理');
+      const rowText = mounted.root.querySelector<HTMLElement>('.feedback-row')?.textContent ?? '';
+      expect(rowText).toContain('已解决');
+      expect(rowText).not.toContain('待处理');
     } finally {
       app?.unmount();
       app = undefined;
@@ -269,7 +320,9 @@ describe('ProductDetailView feedback state', () => {
     const resolvedFeedback = feedback(10, { status: 'resolved' });
     const mounted = await mountView(({ productGet, listByProduct, updateStatus }) => {
       productGet.mockImplementation(async (id) => product(id));
-      listByProduct.mockResolvedValueOnce([openFeedback]).mockRejectedValueOnce(new Error('offline'));
+      listByProduct
+        .mockResolvedValueOnce(feedbackPage([openFeedback]))
+        .mockRejectedValueOnce(new Error('offline'));
       updateStatus.mockResolvedValue(resolvedFeedback);
     });
     let app: App<Element> | undefined = mounted.app;
@@ -298,7 +351,7 @@ describe('ProductDetailView feedback state', () => {
     const enabledFlag = featureFlag(11, { enabled: true });
     const mounted = await mountView(({ productGet, listByProduct, listFlagsByProduct, toggleFlag }) => {
       productGet.mockImplementation(async (id) => product(id));
-      listByProduct.mockResolvedValue([]);
+      listByProduct.mockResolvedValue(feedbackPage([]));
       listFlagsByProduct.mockResolvedValueOnce([disabledFlag]).mockRejectedValueOnce(new Error('offline'));
       toggleFlag.mockResolvedValue(enabledFlag);
     });
@@ -321,7 +374,7 @@ describe('ProductDetailView feedback state', () => {
   });
 
   it('stops stale feedback loading when switched product fails to load', async () => {
-    const firstFeedback = deferred<Feedback[]>();
+    const firstFeedback = deferred<FeedbackPage>();
     const mounted = await mountView(({ productGet, listByProduct }) => {
       productGet.mockImplementation((id) => {
         if (id === 2) return Promise.reject(new Error('product unavailable'));
@@ -329,7 +382,7 @@ describe('ProductDetailView feedback state', () => {
       });
       listByProduct.mockImplementation((productID) => {
         if (productID === 1) return firstFeedback.promise;
-        return Promise.resolve([]);
+        return Promise.resolve(feedbackPage([]));
       });
     });
     let app: App<Element> | undefined = mounted.app;
@@ -344,7 +397,7 @@ describe('ProductDetailView feedback state', () => {
     } finally {
       app?.unmount();
       app = undefined;
-      firstFeedback.resolve([]);
+      firstFeedback.resolve(feedbackPage([]));
     }
   });
 });

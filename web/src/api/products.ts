@@ -1,5 +1,5 @@
 import { api } from './http';
-import type { CreateProductPayload, Product } from './types';
+import type { CreateProductPayload, Product, ProductSummary } from './types';
 
 export const productsApi = {
   create(teamID: number, payload: CreateProductPayload) {
@@ -10,5 +10,8 @@ export const productsApi = {
   },
   get(id: number) {
     return api.get<Product>(`/products/${id}`);
+  },
+  summary(id: number) {
+    return api.get<ProductSummary>(`/products/${id}/summary`);
   }
 };

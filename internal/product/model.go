@@ -25,6 +25,21 @@ type ProductResponse struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ProductSummaryStats struct {
+	FeedbackTotal    int64 `json:"feedback_total"`
+	FeedbackOpen     int64 `json:"feedback_open"`
+	FeedbackResolved int64 `json:"feedback_resolved"`
+	CommentTotal     int64 `json:"comment_total"`
+	VoteTotal        int64 `json:"vote_total"`
+	FlagTotal        int64 `json:"flag_total"`
+	FlagEnabled      int64 `json:"flag_enabled"`
+}
+
+type ProductSummaryResponse struct {
+	Product ProductResponse `json:"product"`
+	ProductSummaryStats
+}
+
 func (p Product) ToResponse() ProductResponse {
 	return ProductResponse{
 		ID:          p.ID,

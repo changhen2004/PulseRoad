@@ -18,7 +18,7 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { teamsApi } from '../api/teams';
-import type { Team } from '../api/types';
+import type { Team, TeamInvitation } from '../api/types';
 
 const router = useRouter();
 const message = useMessage();
@@ -26,6 +26,7 @@ const loading = ref(false);
 const saving = ref(false);
 const drawerOpen = ref(false);
 const teams = ref<Team[]>([]);
+const invitations = ref<TeamInvitation[]>([]);
 
 const form = reactive({
   name: '',
@@ -86,11 +87,30 @@ onMounted(loadTeams);
 async function loadTeams() {
   loading.value = true;
   try {
-    teams.value = await teamsApi.list();
+    const [teamResult, invitationResult] = await Promise.all([
+      teamsApi.list(),
+      teamsApi.listInvitations()
+    ]);
+    teams.value = teamResult;
+    invitations.value = invitationResult;
   } catch (error) {
     message.error(error instanceof Error ? error.message : '加载团队失败');
   } finally {
     loading.value = false;
+  }
+}
+
+async function acceptInvitation(invitation: TeamInvitation) {
+  if (saving.value) return;
+  saving.value = true;
+  try {
+    await teamsApi.acceptInvitation(invitation.id);
+    invitations.value = invitations.value.filter((item) => item.id !== invitation.id);
+    await loadTeams();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '接受邀请失败');
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -141,6 +161,26 @@ function teamRowKey(row: Team) {
         新建团队
       </n-button>
     </div>
+
+    <section v-if="invitations.length > 0" class="content-panel invitation-panel">
+      <div class="feedback-panel-header">
+        <div>
+          <h3>待处理邀请</h3>
+          <p>接受邀请后，团队会出现在你的团队列表中。</p>
+        </div>
+      </div>
+      <div class="invitation-list">
+        <div v-for="invitation in invitations" :key="invitation.id" class="invitation-row">
+          <div>
+            <strong>{{ invitation.team_name }}</strong>
+            <span>{{ invitation.email }} · {{ invitation.role }}</span>
+          </div>
+          <n-button type="primary" size="small" :loading="saving" @click="acceptInvitation(invitation)">
+            接受
+          </n-button>
+        </div>
+      </div>
+    </section>
 
     <section class="content-panel">
       <n-data-table

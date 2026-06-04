@@ -13,4 +13,8 @@ func RegisterRoutes(r gin.IRouter, parser middleware.TokenParser, service *Servi
 	auth.GET("/products/:id/feedback", handler.ListByProduct)
 	auth.GET("/feedback/:id", handler.Get)
 	auth.PATCH("/feedback/:id/status", handler.UpdateStatus)
+	auth.POST("/feedback/:id/comments", handler.CreateComment)
+	auth.GET("/feedback/:id/comments", handler.ListComments)
+	auth.POST("/feedback/:id/vote", handler.Vote)
+	auth.DELETE("/feedback/:id/vote", handler.Unvote)
 }

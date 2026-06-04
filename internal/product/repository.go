@@ -42,3 +42,36 @@ func (r *Repository) FindByID(ctx context.Context, id uint) (*Product, error) {
 	}
 	return &product, nil
 }
+
+func (r *Repository) SummaryStats(ctx context.Context, productID uint) (*ProductSummaryStats, error) {
+	db := r.db.WithContext(ctx)
+	var stats ProductSummaryStats
+	if err := db.Table("feedbacks").Where("product_id = ?", productID).Count(&stats.FeedbackTotal).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feedbacks").Where("product_id = ? AND status = ?", productID, "open").Count(&stats.FeedbackOpen).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feedbacks").Where("product_id = ? AND status = ?", productID, "resolved").Count(&stats.FeedbackResolved).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feedback_comments").
+		Joins("JOIN feedbacks ON feedbacks.id = feedback_comments.feedback_id").
+		Where("feedbacks.product_id = ?", productID).
+		Count(&stats.CommentTotal).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feedback_votes").
+		Joins("JOIN feedbacks ON feedbacks.id = feedback_votes.feedback_id").
+		Where("feedbacks.product_id = ?", productID).
+		Count(&stats.VoteTotal).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feature_flags").Where("product_id = ?", productID).Count(&stats.FlagTotal).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Table("feature_flags").Where("product_id = ? AND enabled = ?", productID, true).Count(&stats.FlagEnabled).Error; err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}

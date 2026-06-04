@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -85,6 +86,43 @@ func Dial(rawURL string) (*Client, error) {
 	}
 
 	return &Client{conn: conn, ch: ch, pub: NewJSONPublisher(ch)}, nil
+}
+
+func DialWithRetry(ctx context.Context, rawURL string, attempts int, interval time.Duration) (*Client, error) {
+	return dialWithRetry(ctx, rawURL, attempts, interval, Dial)
+}
+
+func dialWithRetry(
+	ctx context.Context,
+	rawURL string,
+	attempts int,
+	interval time.Duration,
+	dial func(string) (*Client, error),
+) (*Client, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		client, err := dial(rawURL)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+
+		if attempt == attempts {
+			break
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, fmt.Errorf("connect rabbitmq after %d attempts: %w", attempts, lastErr)
 }
 
 func (c *Client) Close() error {

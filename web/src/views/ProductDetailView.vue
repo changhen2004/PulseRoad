@@ -22,7 +22,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { feedbackApi } from '../api/feedback';
 import { flagflowApi } from '../api/flagflow';
 import { productsApi } from '../api/products';
-import type { FeatureFlag, Feedback, FeedbackStatus, Product } from '../api/types';
+import type {
+  FeatureFlag,
+  Feedback,
+  FeedbackComment,
+  FeedbackStatus,
+  Product,
+  ProductSummary
+} from '../api/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -32,11 +39,18 @@ const feedbackLoading = ref(false);
 const feedbackSaving = ref(false);
 const feedbackDrawerOpen = ref(false);
 const selectedFeedback = ref<Feedback | null>(null);
+const feedbackComments = ref<FeedbackComment[]>([]);
+const commentSaving = ref(false);
 const flagLoading = ref(false);
 const flagSaving = ref(false);
 const flagDrawerOpen = ref(false);
 const product = ref<Product | null>(null);
+const productSummary = ref<ProductSummary | null>(null);
 const feedbackItems = ref<Feedback[]>([]);
+const feedbackStatusFilter = ref<FeedbackStatus | ''>('');
+const feedbackPage = ref(1);
+const feedbackPageSize = 10;
+const feedbackTotal = ref(0);
 const flagItems = ref<FeatureFlag[]>([]);
 const productID = computed(() => Number(route.params.id));
 let productLoadVersion = 0;
@@ -44,6 +58,9 @@ let feedbackLoadVersion = 0;
 let flagLoadVersion = 0;
 const feedbackForm = reactive({
   title: '',
+  content: ''
+});
+const commentForm = reactive({
   content: ''
 });
 const flagForm = reactive({
@@ -64,6 +81,10 @@ type LoadFlagOptions = {
 const canCreateFeedback = computed(
   () => feedbackForm.title.trim().length > 0 && feedbackForm.content.trim().length > 0
 );
+const canCreateComment = computed(() => commentForm.content.trim().length > 0);
+const feedbackTotalPages = computed(() =>
+  Math.max(1, Math.ceil(feedbackTotal.value / feedbackPageSize))
+);
 const canCreateFlag = computed(() => {
   const rollout = Number(flagForm.rolloutPercentage);
   return (
@@ -83,7 +104,9 @@ async function loadProduct() {
   const requestedProductID = productID.value;
   const requestVersion = ++productLoadVersion;
   selectedFeedback.value = null;
+  feedbackComments.value = [];
   product.value = null;
+  productSummary.value = null;
   feedbackItems.value = [];
   flagItems.value = [];
   feedbackLoadVersion++;
@@ -94,9 +117,13 @@ async function loadProduct() {
   if (!Number.isFinite(requestedProductID)) return;
   loading.value = true;
   try {
-    const loadedProduct = await productsApi.get(requestedProductID);
+    const [loadedProduct, loadedSummary] = await Promise.all([
+      productsApi.get(requestedProductID),
+      productsApi.summary(requestedProductID)
+    ]);
     if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
     product.value = loadedProduct;
+    productSummary.value = loadedSummary;
     await Promise.all([
       loadFeedback(requestedProductID, { clearOnError: true }),
       loadFlags(requestedProductID, { clearOnError: true })
@@ -104,6 +131,7 @@ async function loadProduct() {
   } catch (error) {
     if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
     product.value = null;
+    productSummary.value = null;
     feedbackItems.value = [];
     flagItems.value = [];
     message.error(error instanceof Error ? error.message : '加载产品详情失败');
@@ -119,17 +147,23 @@ async function loadFeedback(requestedProductID: number, options: LoadFeedbackOpt
   const requestVersion = ++feedbackLoadVersion;
   feedbackLoading.value = true;
   try {
-    const items = await feedbackApi.listByProduct(requestedProductID);
+    const page = await feedbackApi.listByProduct(requestedProductID, {
+      page: feedbackPage.value,
+      page_size: feedbackPageSize,
+      status: feedbackStatusFilter.value
+    });
     if (!isCurrentFeedbackRequest(requestedProductID, requestVersion)) return;
+    feedbackTotal.value = page.total;
     feedbackItems.value = options.preserveFeedback
-      ? preserveFeedbackItem(items, options.preserveFeedback)
-      : items;
+      ? preserveFeedbackItem(page.items, options.preserveFeedback)
+      : page.items;
   } catch (error) {
     if (!isCurrentFeedbackRequest(requestedProductID, requestVersion)) return;
     if (options.preserveFeedback) {
       feedbackItems.value = preserveFeedbackItem(feedbackItems.value, options.preserveFeedback);
     } else if (options.clearOnError ?? true) {
       feedbackItems.value = [];
+      feedbackTotal.value = 0;
     }
     message.error(error instanceof Error ? error.message : '加载产品反馈失败');
   } finally {
@@ -137,6 +171,17 @@ async function loadFeedback(requestedProductID: number, options: LoadFeedbackOpt
       feedbackLoading.value = false;
     }
   }
+}
+
+async function changeFeedbackFilter(status: FeedbackStatus | '') {
+  feedbackStatusFilter.value = status;
+  feedbackPage.value = 1;
+  await loadFeedback(productID.value, { clearOnError: true });
+}
+
+async function changeFeedbackPage(page: number) {
+  feedbackPage.value = Math.min(Math.max(1, page), feedbackTotalPages.value);
+  await loadFeedback(productID.value, { clearOnError: true });
 }
 
 async function loadFlags(requestedProductID: number, options: LoadFlagOptions = {}) {
@@ -180,12 +225,29 @@ async function createFeedback() {
     feedbackForm.content = '';
     feedbackDrawerOpen.value = false;
     selectedFeedback.value = created;
+    await reloadSummary(requestedProductID);
     await loadFeedback(requestedProductID, { preserveFeedback: created, clearOnError: false });
   } catch (error) {
     if (requestedProductID !== productID.value) return;
     message.error(error instanceof Error ? error.message : '创建反馈失败');
   } finally {
     feedbackSaving.value = false;
+  }
+}
+
+async function reloadSummary(requestedProductID: number) {
+  try {
+    productSummary.value = await productsApi.summary(requestedProductID);
+  } catch {
+    // 摘要失败不阻塞主流程。
+  }
+}
+
+async function loadComments(feedbackID: number) {
+  try {
+    feedbackComments.value = await feedbackApi.listComments(feedbackID);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '加载评论失败');
   }
 }
 
@@ -252,6 +314,7 @@ async function setFeedbackStatus(status: FeedbackStatus) {
     if (requestedProductID !== productID.value) return;
     replaceFeedbackItem(updated);
     selectedFeedback.value = updated;
+    await reloadSummary(requestedProductID);
     await loadFeedback(requestedProductID, { preserveFeedback: updated, clearOnError: false });
   } catch (error) {
     if (requestedProductID !== productID.value) return;
@@ -261,8 +324,55 @@ async function setFeedbackStatus(status: FeedbackStatus) {
   }
 }
 
+async function toggleFeedbackVote(feedback: Feedback) {
+  if (feedbackSaving.value) return;
+  const requestedProductID = productID.value;
+  feedbackSaving.value = true;
+  try {
+    const result = feedback.voted
+      ? await feedbackApi.unvote(feedback.id)
+      : await feedbackApi.vote(feedback.id);
+    const updated = { ...feedback, voted: result.voted, vote_count: result.vote_count };
+    replaceFeedbackItem(updated);
+    if (selectedFeedback.value?.id === feedback.id) selectedFeedback.value = updated;
+    await reloadSummary(requestedProductID);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '更新投票失败');
+  } finally {
+    feedbackSaving.value = false;
+  }
+}
+
+async function createComment() {
+  if (!selectedFeedback.value || commentSaving.value) return;
+  const content = commentForm.content.trim();
+  if (!content) {
+    message.warning('请填写评论内容');
+    return;
+  }
+  commentSaving.value = true;
+  try {
+    const comment = await feedbackApi.createComment(selectedFeedback.value.id, { content });
+    feedbackComments.value = [...feedbackComments.value, comment];
+    commentForm.content = '';
+    const updated = {
+      ...selectedFeedback.value,
+      comment_count: selectedFeedback.value.comment_count + 1
+    };
+    selectedFeedback.value = updated;
+    replaceFeedbackItem(updated);
+    await reloadSummary(productID.value);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '创建评论失败');
+  } finally {
+    commentSaving.value = false;
+  }
+}
+
 function selectFeedback(feedback: Feedback) {
   selectedFeedback.value = feedback;
+  feedbackComments.value = [];
+  void loadComments(feedback.id);
 }
 
 function replaceFeedbackItem(updated: Feedback) {
@@ -365,6 +475,31 @@ function formatDate(value?: string) {
         </div>
       </section>
 
+      <section class="detail-grid summary-grid">
+        <div class="metric">
+          <p class="metric-label">反馈总数</p>
+          <p class="metric-value">{{ productSummary?.feedback_total ?? 0 }}</p>
+        </div>
+        <div class="metric">
+          <p class="metric-label">待处理 / 已解决</p>
+          <p class="metric-value">
+            {{ productSummary?.feedback_open ?? 0 }} / {{ productSummary?.feedback_resolved ?? 0 }}
+          </p>
+        </div>
+        <div class="metric">
+          <p class="metric-label">评论 / 投票</p>
+          <p class="metric-value">
+            {{ productSummary?.comment_total ?? 0 }} / {{ productSummary?.vote_total ?? 0 }}
+          </p>
+        </div>
+        <div class="metric">
+          <p class="metric-label">功能开关</p>
+          <p class="metric-value">
+            {{ productSummary?.flag_enabled ?? 0 }} / {{ productSummary?.flag_total ?? 0 }}
+          </p>
+        </div>
+      </section>
+
       <section class="content-panel product-summary">
         <h3>基础信息</h3>
         <dl>
@@ -436,12 +571,37 @@ function formatDate(value?: string) {
             <h3>产品反馈</h3>
             <p>收集团队对这个产品的反馈，并跟踪处理状态。</p>
           </div>
-          <n-button type="primary" @click="feedbackDrawerOpen = true">
-            <template #icon>
-              <n-icon><Plus /></n-icon>
-            </template>
-            新建反馈
-          </n-button>
+          <div class="panel-actions">
+            <n-space>
+              <n-button
+                size="small"
+                :type="feedbackStatusFilter === '' ? 'primary' : 'default'"
+                @click="changeFeedbackFilter('')"
+              >
+                全部
+              </n-button>
+              <n-button
+                size="small"
+                :type="feedbackStatusFilter === 'open' ? 'primary' : 'default'"
+                @click="changeFeedbackFilter('open')"
+              >
+                待处理
+              </n-button>
+              <n-button
+                size="small"
+                :type="feedbackStatusFilter === 'resolved' ? 'primary' : 'default'"
+                @click="changeFeedbackFilter('resolved')"
+              >
+                已解决
+              </n-button>
+            </n-space>
+            <n-button type="primary" @click="feedbackDrawerOpen = true">
+              <template #icon>
+                <n-icon><Plus /></n-icon>
+              </template>
+              新建反馈
+            </n-button>
+          </div>
         </div>
 
         <n-spin :show="feedbackLoading">
@@ -460,12 +620,43 @@ function formatDate(value?: string) {
                   </n-tag>
                 </div>
                 <p>{{ feedback.content }}</p>
+                <div class="feedback-meta">
+                  <span>{{ feedback.vote_count }} 票</span>
+                  <span>{{ feedback.comment_count }} 条评论</span>
+                </div>
               </div>
-              <time class="feedback-date">{{ formatDate(feedback.created_at) }}</time>
+              <div class="feedback-row-side">
+                <n-button
+                  size="small"
+                  :type="feedback.voted ? 'primary' : 'default'"
+                  :loading="feedbackSaving"
+                  @click.stop="toggleFeedbackVote(feedback)"
+                >
+                  {{ feedback.voted ? '已投票' : '投票' }}
+                </n-button>
+                <time class="feedback-date">{{ formatDate(feedback.created_at) }}</time>
+              </div>
             </n-list-item>
           </n-list>
           <div v-if="!feedbackLoading && feedbackItems.length === 0" class="empty-state">
             暂无产品反馈。
+          </div>
+          <div v-if="feedbackTotal > feedbackPageSize" class="pager-row">
+            <n-button
+              size="small"
+              :disabled="feedbackPage <= 1"
+              @click="changeFeedbackPage(feedbackPage - 1)"
+            >
+              上一页
+            </n-button>
+            <span>第 {{ feedbackPage }} / {{ feedbackTotalPages }} 页</span>
+            <n-button
+              size="small"
+              :disabled="feedbackPage >= feedbackTotalPages"
+              @click="changeFeedbackPage(feedbackPage + 1)"
+            >
+              下一页
+            </n-button>
           </div>
         </n-spin>
       </section>
@@ -557,7 +748,48 @@ function formatDate(value?: string) {
           </n-tag>
           <h3>{{ selectedFeedback.title }}</h3>
           <p>{{ selectedFeedback.content }}</p>
+          <div class="feedback-meta">
+            <span>{{ selectedFeedback.vote_count }} 票</span>
+            <span>{{ selectedFeedback.comment_count }} 条评论</span>
+          </div>
           <time>{{ formatDate(selectedFeedback.created_at) }}</time>
+
+          <n-button
+            :type="selectedFeedback.voted ? 'primary' : 'default'"
+            :loading="feedbackSaving"
+            @click="toggleFeedbackVote(selectedFeedback)"
+          >
+            {{ selectedFeedback.voted ? '取消投票' : '投票支持' }}
+          </n-button>
+
+          <div class="comment-section">
+            <h4>评论</h4>
+            <div v-if="feedbackComments.length === 0" class="comment-empty">暂无评论。</div>
+            <div v-for="comment in feedbackComments" :key="comment.id" class="comment-item">
+              <p>{{ comment.content }}</p>
+              <time>{{ formatDate(comment.created_at) }}</time>
+            </div>
+            <n-form label-placement="top" @submit.prevent="createComment">
+              <n-form-item label="新增评论">
+                <n-input
+                  v-model:value="commentForm.content"
+                  type="textarea"
+                  placeholder="补充上下文、处理进展或讨论结论"
+                  :autosize="{ minRows: 3, maxRows: 6 }"
+                />
+              </n-form-item>
+              <n-space justify="end">
+                <n-button
+                  type="primary"
+                  attr-type="submit"
+                  :disabled="!canCreateComment"
+                  :loading="commentSaving"
+                >
+                  发送评论
+                </n-button>
+              </n-space>
+            </n-form>
+          </div>
 
           <n-space justify="end">
             <n-button

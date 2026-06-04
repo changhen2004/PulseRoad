@@ -50,6 +50,17 @@ describe('api client', () => {
     expect(config.data).toBe(JSON.stringify({ status: 'resolved' }));
   });
 
+  it('supports delete requests', async () => {
+    const adapter = responseAdapter(200, { code: 0, message: 'ok', data: { removed: true } });
+    const api = createApiClient({ adapter });
+
+    await api.delete('/teams/1/members/2');
+
+    const config = vi.mocked(adapter).mock.calls[0][0] as InternalAxiosRequestConfig;
+    expect(config.method).toBe('delete');
+    expect(config.url).toBe('/teams/1/members/2');
+  });
+
   it('clears token and notifies callers when backend returns unauthorized', async () => {
     setStoredToken('token-123');
     const onUnauthorized = vi.fn();

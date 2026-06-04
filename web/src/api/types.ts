@@ -35,6 +35,37 @@ export interface CreateTeamPayload {
   description: string;
 }
 
+export type TeamRole = 'owner' | 'member';
+
+export interface TeamMember {
+  user_id: number;
+  email: string;
+  name: string;
+  role: TeamRole;
+  created_at: string;
+}
+
+export interface TeamInvitation {
+  id: number;
+  team_id: number;
+  team_name: string;
+  email: string;
+  role: TeamRole;
+  status: 'pending' | 'accepted';
+  invited_by: number;
+  accepted_at?: string;
+  created_at: string;
+}
+
+export interface InviteTeamMemberPayload {
+  email: string;
+  role: TeamRole;
+}
+
+export interface UpdateTeamMemberRolePayload {
+  role: TeamRole;
+}
+
 export interface Product {
   id: number;
   team_id: number;
@@ -49,6 +80,17 @@ export interface CreateProductPayload {
   description: string;
 }
 
+export interface ProductSummary {
+  product: Product;
+  feedback_total: number;
+  feedback_open: number;
+  feedback_resolved: number;
+  comment_total: number;
+  vote_total: number;
+  flag_total: number;
+  flag_enabled: number;
+}
+
 export type FeedbackStatus = 'open' | 'resolved';
 
 export interface Feedback {
@@ -58,8 +100,18 @@ export interface Feedback {
   content: string;
   status: FeedbackStatus;
   created_by: number;
+  vote_count: number;
+  comment_count: number;
+  voted: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface FeedbackPage {
+  items: Feedback[];
+  page: number;
+  page_size: number;
+  total: number;
 }
 
 export interface CreateFeedbackPayload {
@@ -69,6 +121,24 @@ export interface CreateFeedbackPayload {
 
 export interface UpdateFeedbackStatusPayload {
   status: FeedbackStatus;
+}
+
+export interface FeedbackComment {
+  id: number;
+  feedback_id: number;
+  content: string;
+  created_by: number;
+  created_at: string;
+}
+
+export interface CreateFeedbackCommentPayload {
+  content: string;
+}
+
+export interface FeedbackVoteResult {
+  feedback_id: number;
+  voted: boolean;
+  vote_count: number;
 }
 
 export interface FeatureFlag {
