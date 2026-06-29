@@ -189,3 +189,40 @@ export interface EvaluateFeatureFlagResult {
   rollout_percentage: number;
   reason: string;
 }
+
+export type RequirementStatus = 'planned' | 'in_progress' | 'released';
+export type RequirementPriority = 'p0' | 'p1' | 'p2' | 'p3';
+
+export interface Requirement {
+  id: number;
+  product_id: number;
+  title: string;
+  description: string;
+  status: RequirementStatus;
+  priority: RequirementPriority;
+  source_feedback_id: number | null;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RequirementPage {
+  items: Requirement[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface CreateRequirementPayload {
+  title: string;
+  description?: string;
+  priority?: RequirementPriority;
+  source_feedback_id?: number | null;
+}
+
+export interface UpdateRequirementPayload {
+  title: string;
+  description: string;
+  status: RequirementStatus;
+  priority: RequirementPriority;
+}
