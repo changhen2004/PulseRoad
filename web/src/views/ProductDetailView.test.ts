@@ -176,6 +176,7 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
   }));
   vi.doMock('naive-ui', () => ({
     NButton: stubComponent('button'),
+    NDropdown: stubComponent(),
     NDrawer: stubComponent(),
     NDrawerContent: stubComponent(),
     NForm: stubComponent('form'),
@@ -185,10 +186,20 @@ async function mountView(configure: (mocks: ViewMocks) => void) {
     NInputNumber: stubComponent('input'),
     NList: stubComponent(),
     NListItem: stubComponent(),
+    NSelect: stubComponent(),
     NSpace: stubComponent(),
     NSpin: asyncStubComponent(),
     NTag: stubComponent('span'),
     useMessage: () => message
+  }));
+  vi.doMock('../api/requirements', () => ({
+    requirementApi: {
+      create: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(),
+      listByProduct: vi.fn().mockResolvedValue({ items: [], page: 1, page_size: 10, total: 0 }),
+      update: vi.fn()
+    }
   }));
 
   const { default: ProductDetailView } = await import('./ProductDetailView.vue');
