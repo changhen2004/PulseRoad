@@ -6,8 +6,9 @@
 /web/dist
 /web/*.tsbuildinfo
 
-# Local config override (contains real credentials)
+# Config (contains real credentials, keep local)
 config.local.yaml
+config.yaml
 
 # Env file with real secrets
 .env
