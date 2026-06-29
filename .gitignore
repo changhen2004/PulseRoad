@@ -15,3 +15,6 @@ config.local.yaml
 # IDE
 .idea/
 .vscode/
+
+# Superpowers runtime
+.superpowers/
