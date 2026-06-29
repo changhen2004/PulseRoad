@@ -9,6 +9,7 @@ import (
 	"pulseroad/internal/pkg/config"
 	"pulseroad/internal/pkg/database"
 	_ "pulseroad/internal/product"
+	_ "pulseroad/internal/requirement"
 	_ "pulseroad/internal/team"
 )
 

@@ -18,6 +18,7 @@ import (
 	"pulseroad/internal/pkg/redis"
 	"pulseroad/internal/pkg/response"
 	"pulseroad/internal/product"
+	"pulseroad/internal/requirement"
 	"pulseroad/internal/team"
 )
 
@@ -73,6 +74,8 @@ func StartHttpServer(cfg *config.Config) {
 	flagflowPublisher := flagflow.NewRabbitMQPublisher(rabbitClient)
 	flagflowService := flagflow.NewService(flagflow.NewRepository(db), productService, flagflowCache, flagflowPublisher)
 	flagflow.RegisterRoutes(r.Group("/api"), authService, flagflowService)
+	requirementService := requirement.NewService(requirement.NewRepository(db), productService)
+	requirement.RegisterRoutes(r.Group("/api"), authService, requirementService)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("[%s] API server starting on %s (env=%s)", cfg.App.Name, addr, cfg.App.Env)
