@@ -4,6 +4,7 @@ import {
   NButton,
   NDrawer,
   NDrawerContent,
+  NDropdown,
   NForm,
   NFormItem,
   NIcon,
@@ -11,6 +12,7 @@ import {
   NInputNumber,
   NList,
   NListItem,
+  NSelect,
   NSpace,
   NSpin,
   NTag,
@@ -21,6 +23,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { feedbackApi } from '../api/feedback';
 import { flagflowApi } from '../api/flagflow';
+import { requirementApi } from '../api/requirements';
 import { productsApi } from '../api/products';
 import type {
   FeatureFlag,
@@ -28,7 +31,12 @@ import type {
   FeedbackComment,
   FeedbackStatus,
   Product,
-  ProductSummary
+  ProductSummary,
+  Requirement,
+  RequirementPriority,
+  RequirementStatus,
+  CreateRequirementPayload,
+  UpdateRequirementPayload
 } from '../api/types';
 
 const route = useRoute();
@@ -70,6 +78,27 @@ const flagForm = reactive({
   environment: 'production',
   rolloutPercentage: 0
 });
+const requirementLoading = ref(false);
+const requirementSaving = ref(false);
+const requirementItems = ref<Requirement[]>([]);
+const requirementDrawerOpen = ref(false);
+const requirementStatusFilter = ref<RequirementStatus | ''>('');
+const requirementPage = ref(1);
+const requirementPageSize = 10;
+const requirementTotal = ref(0);
+let requirementLoadVersion = 0;
+const requirementForm = reactive({
+  title: '',
+  description: '',
+  priority: 'p2' as RequirementPriority,
+  sourceFeedbackId: null as number | null
+});
+const canCreateRequirement = computed(
+  () => requirementForm.title.trim().length > 0
+);
+const requirementTotalPages = computed(() =>
+  Math.max(1, Math.ceil(requirementTotal.value / requirementPageSize))
+);
 type LoadFeedbackOptions = {
   preserveFeedback?: Feedback;
   clearOnError?: boolean;
@@ -109,8 +138,10 @@ async function loadProduct() {
   productSummary.value = null;
   feedbackItems.value = [];
   flagItems.value = [];
+  requirementItems.value = [];
   feedbackLoadVersion++;
   flagLoadVersion++;
+  requirementLoadVersion++;
   feedbackLoading.value = false;
   flagLoading.value = false;
 
@@ -126,7 +157,8 @@ async function loadProduct() {
     productSummary.value = loadedSummary;
     await Promise.all([
       loadFeedback(requestedProductID, { clearOnError: true }),
-      loadFlags(requestedProductID, { clearOnError: true })
+      loadFlags(requestedProductID, { clearOnError: true }),
+      loadRequirements(requestedProductID)
     ]);
   } catch (error) {
     if (!isCurrentProductRequest(requestedProductID, requestVersion)) return;
@@ -134,6 +166,7 @@ async function loadProduct() {
     productSummary.value = null;
     feedbackItems.value = [];
     flagItems.value = [];
+    requirementItems.value = [];
     message.error(error instanceof Error ? error.message : '加载产品详情失败');
   } finally {
     if (isCurrentProductRequest(requestedProductID, requestVersion)) {
@@ -429,6 +462,138 @@ function flagStatusLabel(enabled: boolean) {
   return enabled ? '已开启' : '已关闭';
 }
 
+async function loadRequirements(requestedProductID: number) {
+  if (!Number.isFinite(requestedProductID)) return;
+  const requestVersion = ++requirementLoadVersion;
+  requirementLoading.value = true;
+  try {
+    const page = await requirementApi.listByProduct(requestedProductID, {
+      page: requirementPage.value,
+      page_size: requirementPageSize,
+      status: requirementStatusFilter.value
+    });
+    if (!isCurrentRequirementRequest(requestedProductID, requestVersion)) return;
+    requirementTotal.value = page.total;
+    requirementItems.value = page.items;
+  } catch (error) {
+    if (!isCurrentRequirementRequest(requestedProductID, requestVersion)) return;
+    requirementItems.value = [];
+    requirementTotal.value = 0;
+    message.error(error instanceof Error ? error.message : '加载需求失败');
+  } finally {
+    if (isCurrentRequirementRequest(requestedProductID, requestVersion)) {
+      requirementLoading.value = false;
+    }
+  }
+}
+
+async function changeRequirementFilter(status: RequirementStatus | '') {
+  requirementStatusFilter.value = status;
+  requirementPage.value = 1;
+  await loadRequirements(productID.value);
+}
+
+async function changeRequirementPage(page: number) {
+  requirementPage.value = Math.min(Math.max(1, page), requirementTotalPages.value);
+  await loadRequirements(productID.value);
+}
+
+async function createRequirement() {
+  if (requirementSaving.value) return;
+  const requestedProductID = productID.value;
+  const title = requirementForm.title.trim();
+  if (!Number.isFinite(requestedProductID) || !title) {
+    message.warning('请填写需求标题');
+    return;
+  }
+  requirementSaving.value = true;
+  try {
+    const payload: CreateRequirementPayload = {
+      title,
+      description: requirementForm.description.trim(),
+      priority: requirementForm.priority
+    };
+    if (requirementForm.sourceFeedbackId) {
+      payload.source_feedback_id = requirementForm.sourceFeedbackId;
+    }
+    await requirementApi.create(requestedProductID, payload);
+    if (requestedProductID !== productID.value) return;
+    requirementForm.title = '';
+    requirementForm.description = '';
+    requirementForm.priority = 'p2';
+    requirementForm.sourceFeedbackId = null;
+    requirementDrawerOpen.value = false;
+    requirementPage.value = 1;
+    await loadRequirements(requestedProductID);
+  } catch (error) {
+    if (requestedProductID !== productID.value) return;
+    message.error(error instanceof Error ? error.message : '创建需求失败');
+  } finally {
+    requirementSaving.value = false;
+  }
+}
+
+async function updateRequirementStatus(req: Requirement, status: RequirementStatus) {
+  if (requirementSaving.value) return;
+  const requestedProductID = productID.value;
+  requirementSaving.value = true;
+  try {
+    const payload: UpdateRequirementPayload = {
+      title: req.title,
+      description: req.description,
+      status,
+      priority: req.priority
+    };
+    await requirementApi.update(req.id, payload);
+    if (requestedProductID !== productID.value) return;
+    await loadRequirements(requestedProductID);
+  } catch (error) {
+    if (requestedProductID !== productID.value) return;
+    message.error(error instanceof Error ? error.message : '更新需求状态失败');
+  } finally {
+    requirementSaving.value = false;
+  }
+}
+
+async function deleteRequirement(id: number) {
+  if (requirementSaving.value) return;
+  const requestedProductID = productID.value;
+  requirementSaving.value = true;
+  try {
+    await requirementApi.delete(id);
+    if (requestedProductID !== productID.value) return;
+    await loadRequirements(requestedProductID);
+  } catch (error) {
+    if (requestedProductID !== productID.value) return;
+    message.error(error instanceof Error ? error.message : '删除需求失败');
+  } finally {
+    requirementSaving.value = false;
+  }
+}
+
+function isCurrentRequirementRequest(requestedProductID: number, requestVersion: number) {
+  return requestedProductID === productID.value && requestVersion === requirementLoadVersion;
+}
+
+function requirementStatusType(status: RequirementStatus) {
+  if (status === 'released') return 'success';
+  if (status === 'in_progress') return 'info';
+  return 'default';
+}
+
+function requirementStatusLabel(status: RequirementStatus) {
+  if (status === 'in_progress') return '开发中';
+  if (status === 'released') return '已上线';
+  return '待规划';
+}
+
+function requirementPriorityType(priority: RequirementPriority) {
+  if (priority === 'p0') return 'error';
+  if (priority === 'p1') return 'warning';
+  if (priority === 'p2') return 'info';
+  return 'default';
+}
+
 function formatDate(value?: string) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('zh-CN', {
@@ -561,6 +726,115 @@ function formatDate(value?: string) {
           </n-list>
           <div v-if="!flagLoading && flagItems.length === 0" class="empty-state">
             暂无功能开关。
+          </div>
+        </n-spin>
+      </section>
+
+      <section class="content-panel flag-panel">
+        <div class="flag-panel-header">
+          <div>
+            <h3>需求</h3>
+            <p>管理产品需求规划，跟踪开发状态。</p>
+          </div>
+          <n-button type="primary" @click="requirementDrawerOpen = true">
+            <template #icon>
+              <n-icon><Plus /></n-icon>
+            </template>
+            新建需求
+          </n-button>
+        </div>
+
+        <n-spin :show="requirementLoading">
+          <div class="panel-actions" style="padding: 0 22px; margin-top: 12px;">
+            <n-space>
+              <n-button
+                size="small"
+                :type="requirementStatusFilter === '' ? 'primary' : 'default'"
+                @click="changeRequirementFilter('')"
+              >
+                全部
+              </n-button>
+              <n-button
+                size="small"
+                :type="requirementStatusFilter === 'planned' ? 'primary' : 'default'"
+                @click="changeRequirementFilter('planned')"
+              >
+                待规划
+              </n-button>
+              <n-button
+                size="small"
+                :type="requirementStatusFilter === 'in_progress' ? 'primary' : 'default'"
+                @click="changeRequirementFilter('in_progress')"
+              >
+                开发中
+              </n-button>
+              <n-button
+                size="small"
+                :type="requirementStatusFilter === 'released' ? 'primary' : 'default'"
+                @click="changeRequirementFilter('released')"
+              >
+                已上线
+              </n-button>
+            </n-space>
+          </div>
+          <n-list v-if="requirementItems.length > 0" hoverable :bordered="false">
+            <n-list-item v-for="req in requirementItems" :key="req.id" class="feedback-row">
+              <div class="feedback-row-main">
+                <div class="feedback-row-title">
+                  <strong>{{ req.title }}</strong>
+                  <n-tag :type="requirementStatusType(req.status)" size="small" :bordered="false">
+                    {{ requirementStatusLabel(req.status) }}
+                  </n-tag>
+                  <n-tag :type="requirementPriorityType(req.priority)" size="small" :bordered="false">
+                    {{ req.priority.toUpperCase() }}
+                  </n-tag>
+                </div>
+                <p v-if="req.description">{{ req.description }}</p>
+                <div v-if="req.source_feedback_id" class="feedback-meta">
+                  <span>来自反馈 #{{ req.source_feedback_id }}</span>
+                </div>
+                <div class="feedback-meta">
+                  <span>{{ formatDate(req.created_at) }}</span>
+                </div>
+              </div>
+              <div class="feedback-row-side">
+                <n-dropdown trigger="click" :options="[
+                  { label: '待规划', key: 'planned', disabled: req.status === 'planned' },
+                  { label: '开发中', key: 'in_progress', disabled: req.status === 'in_progress' },
+                  { label: '已上线', key: 'released', disabled: req.status === 'released' }
+                ]" @select="(key: string) => updateRequirementStatus(req, key as RequirementStatus)">
+                  <n-button size="small" :loading="requirementSaving">状态</n-button>
+                </n-dropdown>
+                <n-button
+                  size="small"
+                  type="error"
+                  :loading="requirementSaving"
+                  @click="deleteRequirement(req.id)"
+                >
+                  删除
+                </n-button>
+              </div>
+            </n-list-item>
+          </n-list>
+          <div v-if="!requirementLoading && requirementItems.length === 0" class="empty-state">
+            暂无需求。
+          </div>
+          <div v-if="requirementTotal > requirementPageSize" class="pager-row">
+            <n-button
+              size="small"
+              :disabled="requirementPage <= 1"
+              @click="changeRequirementPage(requirementPage - 1)"
+            >
+              上一页
+            </n-button>
+            <span>第 {{ requirementPage }} / {{ requirementTotalPages }} 页</span>
+            <n-button
+              size="small"
+              :disabled="requirementPage >= requirementTotalPages"
+              @click="changeRequirementPage(requirementPage + 1)"
+            >
+              下一页
+            </n-button>
           </div>
         </n-spin>
       </section>
@@ -727,6 +1001,46 @@ function formatDate(value?: string) {
               attr-type="submit"
               :disabled="!canCreateFeedback"
               :loading="feedbackSaving"
+            >
+              创建
+            </n-button>
+          </n-space>
+        </n-form>
+      </n-drawer-content>
+    </n-drawer>
+
+    <n-drawer v-model:show="requirementDrawerOpen" width="min(420px, 100vw)" placement="right">
+      <n-drawer-content title="新建需求" closable>
+        <n-form label-placement="top" @submit.prevent="createRequirement">
+          <n-form-item label="标题">
+            <n-input v-model:value="requirementForm.title" placeholder="简要描述需求内容" />
+          </n-form-item>
+          <n-form-item label="描述">
+            <n-input
+              v-model:value="requirementForm.description"
+              type="textarea"
+              placeholder="补充需求背景、目标和验收标准"
+              :autosize="{ minRows: 5, maxRows: 10 }"
+            />
+          </n-form-item>
+          <n-form-item label="优先级">
+            <n-select
+              v-model:value="requirementForm.priority"
+              :options="[
+                { label: 'P0 紧急', value: 'p0' },
+                { label: 'P1 高', value: 'p1' },
+                { label: 'P2 中', value: 'p2' },
+                { label: 'P3 低', value: 'p3' }
+              ]"
+            />
+          </n-form-item>
+          <n-space justify="end">
+            <n-button @click="requirementDrawerOpen = false">取消</n-button>
+            <n-button
+              type="primary"
+              attr-type="submit"
+              :disabled="!canCreateRequirement"
+              :loading="requirementSaving"
             >
               创建
             </n-button>
