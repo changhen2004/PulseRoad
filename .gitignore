@@ -5,10 +5,13 @@
 /web/node_modules
 /web/dist
 /web/*.tsbuildinfo
+/docs/
 
-# Config (contains real credentials, keep local)
-config.local.yaml
+# Local config override (contains real credentials)
 config.yaml
+
+# Superpowers runtime
+.superpowers/
 
 # Env file with real secrets
 .env
@@ -16,6 +19,3 @@ config.yaml
 # IDE
 .idea/
 .vscode/
-
-# Superpowers runtime
-.superpowers/
