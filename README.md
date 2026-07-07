@@ -273,9 +273,5 @@ npm --prefix web test -- --run
 npm --prefix web run build
 ```
 
-## 当前边界
-
-- 没有需求、路线图和发布日志模块。
-- 数据库迁移使用 Gorm `AutoMigrate`，没有版本化迁移文件。
 
 当前版本聚焦核心链路，在认证、团队、产品、反馈、功能开关稳定后再扩展需求、路线图等模块。
